@@ -16,7 +16,9 @@ jobs:
           node-version: 22
           cache: npm
       # WASM comes from @edgesentry/ontographia-wasm at install time; no cargo/rust.
+      # `npm run verify` already typechecks and builds, so there is no separate tsc/build step.
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
       - run: npm run verify
+      # Browser smoke uses Playwright's Chromium; the runner has no system Chrome.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run smoke

@@ -2,48 +2,129 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import ts from 'typescript';
 
 const root = resolve(import.meta.dirname, '..');
-const fail = (m) => {
-  console.error('verify FAILED:', m);
+const fail = (message) => {
+  console.error('verify FAILED:', message);
   process.exit(1);
 };
 const sh = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: 'inherit' });
+const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const section = (name) => console.log(`\n== ${name} ==`);
 
+/**
+ * Load a dependency-free TypeScript module without a runtime TS loader.
+ * `typescript` (already a devDependency) transpiles the source, then Node
+ * imports the result from a data URL. Node 22 safe; no brittle source regex.
+ */
+async function loadTsModule(relativePath) {
+  const source = readFileSync(join(root, relativePath), 'utf8');
+  const output = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: relativePath,
+  }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(output).toString('base64')}`);
+}
+
+section('typecheck');
 sh('npx', ['tsc', '--noEmit']);
 
-const data = join(root, 'vendor/ontographia/data');
-for (const f of ['plm.native.yaml', 'chips.json', 'fixtures/deskfan_eol.graph.json']) {
-  if (!existsSync(join(data, f))) fail(`missing data file ${f}`);
+section('vendored data');
+const dataDir = join(root, 'vendor/ontographia/data');
+for (const file of ['plm.native.yaml', 'chips.json', 'fixtures/deskfan_eol.graph.json']) {
+  if (!existsSync(join(dataDir, file))) fail(`missing data file ${file}`);
 }
-const intents = readdirSync(join(data, 'intents')).filter((f) => f.endsWith('.json'));
-if (intents.length !== 5) fail(`expected 5 intents, got ${intents.length}`);
-for (const f of intents) JSON.parse(readFileSync(join(data, 'intents', f), 'utf8'));
-const chips = JSON.parse(readFileSync(join(data, 'chips.json'), 'utf8'));
-const chipList = Array.isArray(chips) ? chips : chips.chips;
-if (!Array.isArray(chipList) || chipList.length !== 5) fail('chips.json must list 5 chips');
-for (const c of chipList) {
-  for (const k of ['label_ja', 'label_en', 'description_ja', 'description_en']) {
-    if (!c[k] || !String(c[k]).trim()) fail(`chip ${c.chip_id || '?'} missing ${k}`);
+const intentFiles = readdirSync(join(dataDir, 'intents'))
+  .filter((file) => file.endsWith('.json'))
+  .sort();
+if (intentFiles.length !== 5) fail(`expected 5 intents, got ${intentFiles.length}`);
+const intents = new Map();
+for (const file of intentFiles) {
+  try {
+    intents.set(file, JSON.parse(readFileSync(join(dataDir, 'intents', file), 'utf8')));
+  } catch (error) {
+    fail(`invalid Intent JSON ${file}: ${error.message}`);
   }
 }
-for (const f of ['chips.json', 'fixtures/deskfan_eol.graph.json']) {
-  if (/pfas/i.test(readFileSync(join(data, f), 'utf8'))) fail(`PFAS content in ${f}`);
+
+const chipsRaw = JSON.parse(readFileSync(join(dataDir, 'chips.json'), 'utf8'));
+const chipList = Array.isArray(chipsRaw) ? chipsRaw : chipsRaw.chips;
+if (!Array.isArray(chipList) || chipList.length !== 5) fail('chips.json must list 5 chips');
+const validLanes = new Set(['ebom', 'mbom', 'sbom', 'bop']);
+for (const chip of chipList) {
+  for (const key of ['label_ja', 'label_en', 'description_ja', 'description_en']) {
+    if (!chip[key] || !String(chip[key]).trim()) fail(`chip ${chip.chip_id || '?'} missing ${key}`);
+  }
+  if (!Array.isArray(chip.lane_hints) || chip.lane_hints.length === 0) {
+    fail(`chip ${chip.chip_id || '?'} missing lane_hints`);
+  }
+  for (const lane of chip.lane_hints) {
+    if (!validLanes.has(lane)) fail(`chip ${chip.chip_id} has unknown lane hint ${lane}`);
+  }
+}
+const chipIntentFiles = chipList.map((chip) => basename(chip.intent_path));
+if (new Set(chipIntentFiles).size !== 5) fail('chip intent_path values must resolve to 5 distinct filenames');
+for (const file of chipIntentFiles) {
+  if (!intentFiles.includes(file)) fail(`chip intent_path does not resolve under data/intents/: ${file}`);
 }
 
-const i18nSrc = readFileSync(join(root, 'src/i18n.ts'), 'utf8');
-const block = (lang) => {
-  const m = i18nSrc.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},`));
-  if (!m) fail(`i18n block ${lang} not found`);
-  return [...m[1].matchAll(/^\s{4}(\w+):\s*(?:\n\s*)?'([^']*)'/gm)].map((x) => [x[1], x[2]]);
-};
-const en = block('en');
-const ja = block('ja');
-if (en.map((x) => x[0]).join() !== ja.map((x) => x[0]).join()) fail('ja/en i18n keys differ');
-if ([...en, ...ja].some(([, v]) => !v.trim())) fail('empty i18n string');
+const fixtureText = readFileSync(join(dataDir, 'fixtures/deskfan_eol.graph.json'), 'utf8');
+const fixture = JSON.parse(fixtureText);
+if (!Array.isArray(fixture.nodes) || fixture.nodes.length !== 18) {
+  fail(`fixture must contain 18 nodes, got ${fixture.nodes?.length}`);
+}
+if (!Array.isArray(fixture.edges)) fail('fixture must contain an edges array');
+if (new Set(fixture.nodes.map((node) => node.id)).size !== fixture.nodes.length) {
+  fail('fixture node ids must be unique');
+}
+for (const node of fixture.nodes) {
+  const lane = node.properties?.lane;
+  if (!validLanes.has(lane)) fail(`fixture node ${node.id} has unknown lane ${String(lane)}`);
+  if (lane === 'mbom') fail(`fixture node ${node.id} is tagged MBOM; the vendored fixture has no MBOM data`);
+}
 
-// Engine comes from the published npm package; no git pin, cargo, or prepare step.
+for (const [relative, text] of [
+  ['chips.json', readFileSync(join(dataDir, 'chips.json'), 'utf8')],
+  ['fixtures/deskfan_eol.graph.json', fixtureText],
+  ...intentFiles.map((file) => [`intents/${file}`, readFileSync(join(dataDir, 'intents', file), 'utf8')]),
+  ['plm.native.yaml', readFileSync(join(dataDir, 'plm.native.yaml'), 'utf8')],
+]) {
+  if (/pfas/i.test(text)) fail(`PFAS content in ${relative}`);
+}
+
+section('i18n');
+const { messages } = await loadTsModule('src/i18n.ts');
+const enKeys = Object.keys(messages.en);
+const jaKeys = Object.keys(messages.ja);
+if (enKeys.join('|') !== jaKeys.join('|')) fail('ja/en i18n key sets or order differ');
+if (enKeys.length === 0) fail('i18n has no messages');
+for (const [lang, block] of Object.entries(messages)) {
+  for (const [key, value] of Object.entries(block)) {
+    if (typeof value !== 'string' || !value.trim()) fail(`empty i18n string ${lang}.${String(key)}`);
+  }
+}
+if (!/Intent executor/.test(messages.en.disclaimer) || !/not executed/.test(messages.en.disclaimer)) {
+  fail('en disclaimer must describe the Intent executor and that the Cypher was not executed');
+}
+if (!/Intent エグゼキュータ/.test(messages.ja.disclaimer) || !/実行されていません/.test(messages.ja.disclaimer)) {
+  fail('ja disclaimer must describe the Intent executor and that the Cypher was not executed');
+}
+if (/graph is not executed/i.test(messages.en.disclaimer) || /グラフは実行されません/.test(messages.ja.disclaimer)) {
+  fail('old disclaimer wording still present');
+}
+for (const key of ['noMatches', 'verified', 'compiledBadge', 'notExecutedNote', 'mbomNote', 'errorHeading']) {
+  if (!messages.en[key] || !messages.ja[key]) fail(`missing ja/en message ${key}`);
+}
+if (!/^No matches/i.test(messages.en.noMatches) || !messages.ja.noMatches.startsWith('一致なし')) {
+  fail('noMatches copy must exist in ja and en');
+}
+
+section('WASM package smoke');
 const require = createRequire(import.meta.url);
 const pkgDir = dirname(require.resolve('@edgesentry/ontographia-wasm/package.json'));
 const pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
@@ -51,48 +132,294 @@ if (pkg.version !== '0.1.9') fail(`expected @edgesentry/ontographia-wasm 0.1.9, 
 const wasmPath = join(pkgDir, 'ontographia_wasm.wasm');
 if (!existsSync(wasmPath)) fail(`WASM missing from package at ${wasmPath}`);
 const wasmBytes = readFileSync(wasmPath);
+const wasmSha256 = sha256(wasmBytes);
+
 const binding = await import('@edgesentry/ontographia-wasm');
 const og = await binding.loadOntographia(wasmBytes);
-if (og.abiVersion !== 1) fail(`abiVersion ${og.abiVersion} !== 1`);
-const ontology = readFileSync(join(data, 'plm.native.yaml'));
-for (const f of intents) {
-  const intent = JSON.parse(readFileSync(join(data, 'intents', f), 'utf8'));
-  const res = og.buildCypher(ontology, intent, { dialect: 'cypher25', ontologyPathHint: 'plm.native.yaml' });
-  if (!res.query || typeof res.query !== 'string') fail(`smoke: empty query for ${f}`);
-  if (!res.params || typeof res.params !== 'object') fail(`smoke: bad params for ${f}`);
+const { assertAbiVersion } = await loadTsModule('src/lib/abi.ts');
+assertAbiVersion(og.abiVersion);
+for (const abi of [0, 2, '1', null]) {
+  let rejected = false;
+  try {
+    assertAbiVersion(abi);
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) fail(`ABI guard accepted invalid version ${String(abi)}`);
 }
+
+const ontologyText = readFileSync(join(dataDir, 'plm.native.yaml'), 'utf8');
+const compiled = new Map();
+for (const file of intentFiles) {
+  const result = og.buildCypher(ontologyText, intents.get(file), {
+    dialect: 'cypher25',
+    ontologyPathHint: 'plm.native.yaml',
+  });
+  if (!result.query || typeof result.query !== 'string') fail(`WASM smoke: empty query for ${file}`);
+  if (!result.params || typeof result.params !== 'object') fail(`WASM smoke: bad params for ${file}`);
+  compiled.set(file, result);
+}
+let malformedRejected = false;
 try {
-  og.buildCypher(ontology, { not: 'an-intent' }, { dialect: 'cypher25', ontologyPathHint: 'plm.native.yaml' });
-  fail('smoke: malformed intent should reject');
+  og.buildCypher(ontologyText, { not: 'an-intent' }, {
+    dialect: 'cypher25',
+    ontologyPathHint: 'plm.native.yaml',
+  });
 } catch {
-  // expected
+  malformedRejected = true;
+}
+if (!malformedRejected) fail('WASM smoke: malformed Intent should reject');
+
+section('Intent executor gold tests');
+const executor = await loadTsModule('src/lib/executor.ts');
+const hierarchy = executor.parseOntology(ontologyText);
+for (const className of ['Part', 'Assembly', 'Revision', 'Substance']) {
+  if (!(hierarchy.parents.get(className) ?? []).includes('Item')) {
+    fail(`COM inheritance missing: ${className} must extend Item`);
+  }
+  if (!executor.classMatches([className], 'Item', hierarchy)) {
+    fail(`COM inheritance match failed: ${className} should match Item`);
+  }
+}
+const runIntent = (file, mutate) => {
+  const intent = structuredClone(intents.get(file));
+  if (mutate) mutate(intent);
+  return executor.executeIntent(fixture, intent, ontologyText);
+};
+
+const gold = [
+  {
+    file: '01_affected_products.json',
+    path: ['DEMO-BRKT-01', 'DEMO-FAN-100', 'DEMO-FAN-200', 'DEMO-FAN-300'],
+    rows: 3,
+  },
+  {
+    file: '02_affected_bop.json',
+    path: ['OP-BRKT-MOUNT', 'WC-LINE-A'],
+    rows: 1,
+  },
+  {
+    file: '03_affected_customers.json',
+    path: [
+      'DEMO-BRKT-01',
+      'DEMO-FAN-100',
+      'DEMO-FAN-200',
+      'DEMO-FAN-300',
+      'CUST-EU-01',
+      'CUST-NA-01',
+      'CUST-APAC-01',
+    ],
+    rows: 3,
+  },
+  {
+    file: '04_alternatives.json',
+    path: ['DEMO-BRKT-01', 'DEMO-BRKT-02'],
+    rows: 1,
+  },
+  {
+    file: '05_residual_risk.json',
+    path: [
+      'DEMO-ECO-FAN-01',
+      'DEMO-BRKT-01',
+      'DEMO-FAN-100',
+      'DEMO-FAN-200',
+      'DEMO-FAN-300',
+    ],
+    rows: 4,
+  },
+];
+const goldResults = new Map();
+for (const expected of gold) {
+  const result = runIntent(expected.file);
+  const actualPath = [...result.pathNodeIds].sort();
+  const expectedPath = [...expected.path].sort();
+  if (JSON.stringify(actualPath) !== JSON.stringify(expectedPath)) {
+    fail(
+      `${expected.file} path mismatch\n  expected: ${expectedPath.join(', ')}\n  actual:   ${actualPath.join(', ')}`,
+    );
+  }
+  if (result.rows.length !== expected.rows) {
+    fail(`${expected.file} expected ${expected.rows} rows, got ${result.rows.length}`);
+  }
+  goldResults.set(expected.file, result);
 }
 
-const headers = readFileSync(join(root, 'public/_headers'), 'utf8');
-if (!headers.includes("wasm-unsafe-eval")) fail('_headers missing wasm-unsafe-eval');
-if (!headers.includes("Content-Security-Policy")) fail('_headers missing CSP');
+const products = goldResults.get('01_affected_products.json');
+const productNumbers = products.rows.map((row) => row.part_number).sort();
+if (JSON.stringify(productNumbers) !== JSON.stringify(['DEMO-FAN-100', 'DEMO-FAN-200', 'DEMO-FAN-300'])) {
+  fail(`affected_products rows mismatch: ${productNumbers.join(', ')}`);
+}
+if (!products.rows.every((row) => typeof row.name === 'string' && row.name.trim())) {
+  fail('affected_products rows must include non-empty names');
+}
+if (products.pathNodeIds.includes('REV-BRKT-01-A')) fail('affected_products must not walk HAS_REVISION');
 
+const bop = goldResults.get('02_affected_bop.json');
+if (bop.rows[0].operation_name !== 'OP-BRKT-MOUNT' || bop.rows[0].work_center_name !== 'Assembly line A') {
+  fail('affected_bop row mismatch');
+}
+if (bop.pathNodeIds.includes('DEMO-BRKT-01')) fail('affected_bop must not auto-extend to the bracket');
+
+const customers = goldResults.get('03_affected_customers.json');
+const customerNames = customers.rows.map((row) => row.customer_name).sort();
+if (
+  JSON.stringify(customerNames) !==
+  JSON.stringify(['Fictional APAC partner', 'Fictional EU distributor', 'Fictional NA retailer'])
+) {
+  fail(`affected_customers rows mismatch: ${customerNames.join(', ')}`);
+}
+if (
+  JSON.stringify(customers.rows.map((row) => row.part_number).sort()) !==
+  JSON.stringify(['DEMO-FAN-100', 'DEMO-FAN-200', 'DEMO-FAN-300'])
+) {
+  fail('affected_customers must join all three assemblies');
+}
+
+const alternatives = goldResults.get('04_alternatives.json');
+if (alternatives.rows[0].alternate_part_number !== 'DEMO-BRKT-02') {
+  fail('alternatives row mismatch');
+}
+
+const risk = goldResults.get('05_residual_risk.json');
+const riskItems = risk.rows.map((row) => row.affected_item).sort();
+if (
+  JSON.stringify(riskItems) !==
+  JSON.stringify(['DEMO-BRKT-01', 'DEMO-FAN-100', 'DEMO-FAN-200', 'DEMO-FAN-300'])
+) {
+  fail(`residual_risk rows mismatch: ${riskItems.join(', ')}`);
+}
+if (!risk.rows.every((row) => row.eco_id === 'DEMO-ECO-FAN-01' && row.eco_status === 'open')) {
+  fail('residual_risk must only return open DEMO-ECO-FAN-01');
+}
+if (risk.pathNodeIds.includes('DEMO-ECO-FAN-02') || risk.pathNodeIds.includes('DEMO-BRKT-02')) {
+  fail('residual_risk must exclude the closed ECO and the alternate bracket');
+}
+if (risk.pathNodeIds.includes('OP-BRKT-MOUNT')) {
+  fail('residual_risk must not walk reverse CONSUMES edges');
+}
+
+const empty = runIntent('01_affected_products.json', (intent) => {
+  intent.filter[0].value = 'DEMO-DOES-NOT-EXIST';
+});
+if (empty.rows.length !== 0 || empty.pathNodeIds.length !== 0) {
+  fail('empty-result filter must succeed with zero rows and zero highlighted nodes');
+}
+if (empty.stats.returned !== 0) fail('empty-result stats.returned must be 0');
+
+let executorMalformedRejected = true;
+for (const bad of [{}, { start: { class: 'Part', alias: 'p' } }, { start: { class: 'Part', alias: 'p' }, return: [] }]) {
+  let rejected = false;
+  try {
+    executor.executeIntent(fixture, bad, ontologyText);
+  } catch (error) {
+    rejected = error?.code === 'invalid_intent';
+  }
+  if (!rejected) {
+    executorMalformedRejected = false;
+    fail(`malformed Intent should throw invalid_intent: ${JSON.stringify(bad)}`);
+  }
+}
+
+let unsupportedOpRejected = false;
+try {
+  runIntent('01_affected_products.json', (intent) => {
+    intent.filter[0].op = 'ne';
+  });
+} catch (error) {
+  unsupportedOpRejected = error?.code === 'unsupported_op';
+}
+if (!unsupportedOpRejected) fail('non-eq filter op must be rejected as unsupported_op');
+
+const limited = runIntent('03_affected_customers.json', (intent) => {
+  intent.limit = 1;
+});
+if (limited.rows.length !== 1 || limited.pathNodeIds.length !== 3) {
+  fail(`limit=1 should return 1 row over a 3-node path, got ${limited.rows.length} rows / ${limited.pathNodeIds.length} nodes`);
+}
+
+section('production build');
 sh('npx', ['vite', 'build']);
 if (!existsSync(join(root, 'dist/index.html'))) fail('dist/index.html missing after build');
 const distAssets = join(root, 'dist/assets');
-const distWasm = existsSync(distAssets)
-  ? readdirSync(distAssets).filter((f) => f.endsWith('.wasm'))
+const distWasmFiles = existsSync(distAssets)
+  ? readdirSync(distAssets).filter((file) => file.endsWith('.wasm'))
   : [];
-if (distWasm.length !== 1) fail(`expected 1 built .wasm asset, got ${distWasm.length}`);
+if (distWasmFiles.length !== 1) fail(`expected 1 built .wasm asset, got ${distWasmFiles.length}`);
+const distWasmPath = join(distAssets, distWasmFiles[0]);
+const distWasmBytes = readFileSync(distWasmPath);
+const distWasmSha256 = sha256(distWasmBytes);
+if (distWasmBytes.length !== wasmBytes.length) {
+  fail(`package vs dist WASM byte size differs: ${wasmBytes.length} vs ${distWasmBytes.length}`);
+}
+if (distWasmSha256 !== wasmSha256) {
+  fail(`package vs dist WASM SHA-256 differs: ${wasmSha256} vs ${distWasmSha256}`);
+}
+
+section('headers');
+const publicHeaders = readFileSync(join(root, 'public/_headers'), 'utf8');
+const distHeadersPath = join(root, 'dist/_headers');
+if (!existsSync(distHeadersPath)) fail('dist/_headers missing after build');
+if (readFileSync(distHeadersPath, 'utf8') !== publicHeaders) fail('dist/_headers differs from public/_headers');
+const headerBlocks = publicHeaders
+  .split(/\n\s*\n/)
+  .map((block) => block.trim())
+  .filter(Boolean);
+const blockFor = (pattern) => headerBlocks.find((block) => block.split('\n')[0].trim() === pattern);
+const globalBlock = blockFor('/*');
+if (!globalBlock) fail('_headers missing /* CSP block');
+if (!/wasm-unsafe-eval/.test(globalBlock)) fail('_headers CSP missing wasm-unsafe-eval');
+if (!/default-src 'none'/.test(globalBlock)) fail('_headers CSP must default to none');
+if (!/connect-src 'self'/.test(globalBlock)) fail('_headers CSP must allow same-origin connect-src');
+const wasmBlock = blockFor('/assets/*.wasm');
+if (!wasmBlock) fail('_headers missing /assets/*.wasm rule');
+if (!/^\s*Content-Type:\s*application\/wasm\s*$/im.test(wasmBlock)) {
+  fail('_headers /assets/*.wasm rule must set Content-Type: application/wasm');
+}
+const assetsBlock = blockFor('/assets/*');
+if (!assetsBlock) fail('_headers missing /assets/* rule');
+if (!/^\s*Cache-Control:.*immutable/im.test(assetsBlock)) {
+  fail('_headers /assets/* rule must set an immutable Cache-Control');
+}
+if (!/max-age=31536000/.test(assetsBlock)) fail('_headers immutable Cache-Control should use max-age=31536000');
 
 console.log(
   JSON.stringify(
     {
       ok: true,
+      node: process.version,
       package: `${pkg.name}@${pkg.version}`,
       abiVersion: og.abiVersion,
-      intents: intents.length,
-      wasm: {
-        sourceBytes: wasmBytes.length,
-        sourceSha256: createHash('sha256').update(wasmBytes).digest('hex'),
-        distAsset: distWasm[0],
-        distBytes: readFileSync(join(distAssets, distWasm[0])).length,
+      intents: intentFiles.length,
+      chips: chipList.length,
+      graph: {
+        nodes: fixture.nodes.length,
+        edges: fixture.edges.length,
+        lanes: [...new Set(fixture.nodes.map((node) => node.properties.lane))],
+        mbomNodes: fixture.nodes.filter((node) => node.properties.lane === 'mbom').length,
       },
+      i18n: { enKeys: enKeys.length, jaKeys: jaKeys.length },
+      gold: Object.fromEntries(
+        [...goldResults].map(([file, result]) => [
+          file,
+          {
+            rows: result.rows.length,
+            pathNodes: [...result.pathNodeIds].sort(),
+            pathEdges: result.pathEdgeKeys.length,
+            cypher: compiled.get(file).query.split('\n')[0],
+          },
+        ]),
+      ),
+      emptyResult: { rows: empty.rows.length, pathNodes: empty.pathNodeIds.length },
+      malformed: { wasmRejected: malformedRejected, executorRejected: executorMalformedRejected },
+      wasm: {
+        packageBytes: wasmBytes.length,
+        packageSha256: wasmSha256,
+        distAsset: distWasmFiles[0],
+        distBytes: distWasmBytes.length,
+        distSha256: distWasmSha256,
+        match: true,
+      },
+      headers: { publicRules: headerBlocks.length, distCopied: true, wasmMime: 'application/wasm' },
     },
     null,
     2,
