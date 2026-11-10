@@ -2,15 +2,18 @@
 //
 // Uses Playwright's Chromium when installed, otherwise falls back to the system
 // Google Chrome channel. Run after `npm run verify` (which produces dist/).
+// Set SMOKE_BASE_URL to check a live deploy instead of spawning `vite preview`.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const root = resolve(import.meta.dirname, '..');
+const liveBase = process.env.SMOKE_BASE_URL?.trim();
 const port = Number(process.env.SMOKE_PORT ?? 4173);
-const base = `http://127.0.0.1:${port}/`;
+const base = (liveBase || `http://127.0.0.1:${port}`).replace(/\/?$/, '/');
 const baseOrigin = new URL(base).origin;
+const useLive = Boolean(liveBase);
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 
 const assert = (condition, message) => {
@@ -92,32 +95,35 @@ async function launchBrowser() {
 }
 
 async function main() {
-  if (!existsSync(join(root, 'dist/index.html'))) {
+  if (!useLive && !existsSync(join(root, 'dist/index.html'))) {
     throw new Error('dist/index.html is missing; run `npm run verify` (or `npm run build`) first');
   }
 
-  const server = spawn(
-    'npx',
-    ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
-    {
-      cwd: root,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      // Own process group so the preview and its esbuild child can be stopped
-      // together; otherwise CI can hang on inherited stdio after the checks pass.
-      detached: process.platform !== 'win32',
-    },
-  );
+  let server;
   let serverLog = '';
-  server.stdout.on('data', (chunk) => {
-    serverLog += chunk.toString();
-  });
-  server.stderr.on('data', (chunk) => {
-    serverLog += chunk.toString();
-  });
+  if (!useLive) {
+    server = spawn(
+      'npx',
+      ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+      {
+        cwd: root,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // Own process group so the preview and its esbuild child can be stopped
+        // together; otherwise CI can hang on inherited stdio after the checks pass.
+        detached: process.platform !== 'win32',
+      },
+    );
+    server.stdout.on('data', (chunk) => {
+      serverLog += chunk.toString();
+    });
+    server.stderr.on('data', (chunk) => {
+      serverLog += chunk.toString();
+    });
+  }
 
   let browser;
   try {
-    await waitForServer();
+    if (!useLive) await waitForServer();
     const launched = await launchBrowser();
     browser = launched.browser;
     const context = await browser.newContext({
@@ -362,17 +368,19 @@ async function main() {
     console.log('smoke OK');
   } finally {
     if (browser) await browser.close();
-    try {
-      if (process.platform !== 'win32' && server.pid) {
-        process.kill(-server.pid, 'SIGTERM');
-      } else {
+    if (server) {
+      try {
+        if (process.platform !== 'win32' && server.pid) {
+          process.kill(-server.pid, 'SIGTERM');
+        } else {
+          server.kill('SIGTERM');
+        }
+      } catch {
         server.kill('SIGTERM');
       }
-    } catch {
-      server.kill('SIGTERM');
+      server.stdout.destroy();
+      server.stderr.destroy();
     }
-    server.stdout.destroy();
-    server.stderr.destroy();
     await delay(200);
   }
 }

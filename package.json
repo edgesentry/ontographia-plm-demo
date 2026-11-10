@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "verify": "node scripts/verify.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:live": "SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ node scripts/smoke.mjs"
   },
   "engines": {
     "node": ">=22"

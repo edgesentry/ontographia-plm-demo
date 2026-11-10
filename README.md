@@ -61,6 +61,27 @@ On a machine without Playwright's browser bundle:
 npx playwright install chromium
 ```
 
+### Live smoke
+
+To run the same assertions against a deployed Worker, set `SMOKE_BASE_URL`:
+
+```bash
+npm run smoke:live
+```
+
+or equivalently:
+
+```bash
+SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ npm run smoke
+```
+
+`npm run smoke:live` defaults to the production Workers URL. `SMOKE_BASE_URL` can also point at a
+preview deploy URL. Setting it skips `vite preview` (no local server is started) and does not require
+a local `dist/`; the browser drives the given URL directly. Leaving `SMOKE_BASE_URL` unset keeps
+`npm run smoke` unchanged: it builds nothing itself, requires `dist/`, and serves it through
+`vite preview` on `SMOKE_PORT` (default `4173`). The WASM failure case uses Playwright
+`route.abort()` on `**/*.wasm`, so it runs in both local and live modes.
+
 ## Deploy
 
 Deployment targets Cloudflare Workers with static assets via Workers Builds (Git integration), not
