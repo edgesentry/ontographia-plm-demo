@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const fail = (m) => {
@@ -42,10 +43,16 @@ const ja = block('ja');
 if (en.map((x) => x[0]).join() !== ja.map((x) => x[0]).join()) fail('ja/en i18n keys differ');
 if ([...en, ...ja].some(([, v]) => !v.trim())) fail('empty i18n string');
 
-const wasmPath = join(root, 'public/assets/ontographia/ontographia_wasm.wasm');
-if (!existsSync(wasmPath)) fail('WASM missing; run `npm run prepare:wasm` first');
-const binding = await import(pathToFileURL(join(root, 'vendor/ontographia/binding/ontographia-wasm.js')).href);
-const og = await binding.loadOntographia(readFileSync(wasmPath));
+// Engine comes from the published npm package; no git pin, cargo, or prepare step.
+const require = createRequire(import.meta.url);
+const pkgDir = dirname(require.resolve('@edgesentry/ontographia-wasm/package.json'));
+const pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+if (pkg.version !== '0.1.9') fail(`expected @edgesentry/ontographia-wasm 0.1.9, got ${pkg.version}`);
+const wasmPath = join(pkgDir, 'ontographia_wasm.wasm');
+if (!existsSync(wasmPath)) fail(`WASM missing from package at ${wasmPath}`);
+const wasmBytes = readFileSync(wasmPath);
+const binding = await import('@edgesentry/ontographia-wasm');
+const og = await binding.loadOntographia(wasmBytes);
 if (og.abiVersion !== 1) fail(`abiVersion ${og.abiVersion} !== 1`);
 const ontology = readFileSync(join(data, 'plm.native.yaml'));
 for (const f of intents) {
@@ -67,4 +74,28 @@ if (!headers.includes("Content-Security-Policy")) fail('_headers missing CSP');
 
 sh('npx', ['vite', 'build']);
 if (!existsSync(join(root, 'dist/index.html'))) fail('dist/index.html missing after build');
+const distAssets = join(root, 'dist/assets');
+const distWasm = existsSync(distAssets)
+  ? readdirSync(distAssets).filter((f) => f.endsWith('.wasm'))
+  : [];
+if (distWasm.length !== 1) fail(`expected 1 built .wasm asset, got ${distWasm.length}`);
+
+console.log(
+  JSON.stringify(
+    {
+      ok: true,
+      package: `${pkg.name}@${pkg.version}`,
+      abiVersion: og.abiVersion,
+      intents: intents.length,
+      wasm: {
+        sourceBytes: wasmBytes.length,
+        sourceSha256: createHash('sha256').update(wasmBytes).digest('hex'),
+        distAsset: distWasm[0],
+        distBytes: readFileSync(join(distAssets, distWasm[0])).length,
+      },
+    },
+    null,
+    2,
+  ),
+);
 console.log('verify OK');
