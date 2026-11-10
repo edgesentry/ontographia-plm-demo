@@ -63,9 +63,30 @@ npx playwright install chromium
 
 ## Deploy
 
-Deploy the `dist/` folder to Cloudflare Pages (`npm run build`). `public/_headers` carries the CSP,
-the `application/wasm` content type, and immutable caching for hashed `/assets/*`. Deployment is a
+Deployment targets Cloudflare Workers with static assets via Workers Builds (Git integration), not
+Cloudflare Pages. `npm run build` emits `dist/`; `public/_headers` is copied into `dist/` by Vite and
+is honored by Workers Assets, where it carries the CSP, the `application/wasm` content type, and
+immutable caching for hashed `/assets/*`. The `_headers` file itself is not served. Deployment is a
 maintainer step; CI does not deploy.
+
+`wrangler.jsonc` at the repo root is an assets-only Worker config: it has no `main` script, serves
+`./dist`, and deliberately omits `not_found_handling` so unknown paths return `404` instead of
+falling back to `index.html` (this app has no client-side routes).
+
+Once this lands on `main`, connect the repository in the dashboard via **Workers & Pages → Create an
+application → Workers → Connect to Git** and use these values:
+
+| Setting | Value |
+| --- | --- |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Root directory | repository root (leave default) |
+| Production branch | `main` |
+| Build variable `NODE_VERSION` | `22` (Settings > Build > Build Variables and Secrets) |
+
+The Worker name must match `name` in `wrangler.jsonc` (`ontographia-plm-demo`), otherwise the build
+fails. Preview builds can be enabled for non-`main` branches; the default preview command is
+`npx wrangler preview`.
 
 ## Data and audit
 
