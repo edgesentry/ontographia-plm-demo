@@ -1,0 +1,7 @@
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; worker-src 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+
+/assets/*.wasm
+  Content-Type: application/wasm
