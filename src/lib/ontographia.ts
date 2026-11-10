@@ -7,6 +7,7 @@ import {
   type WasmSource,
 } from '@edgesentry/ontographia-wasm';
 import wasmUrl from '@edgesentry/ontographia-wasm/ontographia_wasm.wasm?url';
+import { assertAbiVersion } from './abi';
 
 export type Dialect = WasmDialect;
 
@@ -32,7 +33,7 @@ const DEFAULT_OPTIONS: BuildOptions = { dialect: 'cypher25', ontologyPathHint: '
 export async function loadOntographia(source: WasmSource = wasmUrl): Promise<Ontographia> {
   const raw: OntographiaWasm = await loadWasmEngine(source);
   const abi = raw.abiVersion;
-  if (abi !== 1) throw new Error(`Unsupported Ontographia ABI version: ${String(abi)} (expected 1)`);
+  assertAbiVersion(abi);
   return {
     abiVersion: abi,
     buildCypher(ontology, intent, options) {
