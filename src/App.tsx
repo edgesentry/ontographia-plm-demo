@@ -84,6 +84,21 @@ export function App() {
   const pathNodes = useMemo(() => new Set(result?.execution.pathNodeIds ?? []), [result]);
   const startNodes = useMemo(() => new Set(result?.execution.startNodeIds ?? []), [result]);
   const pathEdges = useMemo(() => new Set(result?.execution.pathEdgeKeys ?? []), [result]);
+  // Ripple order: start nodes first (lowest indices), then the executor's
+  // pathNodeIds insertion order for the rest. Never sort the ids.
+  const rippleIndex = useMemo(() => {
+    const execution = result?.execution;
+    if (!execution) return new Map<string, number>();
+    const onPath = new Set(execution.pathNodeIds);
+    const order: string[] = [];
+    for (const id of execution.startNodeIds) {
+      if (onPath.has(id) && !order.includes(id)) order.push(id);
+    }
+    for (const id of execution.pathNodeIds) {
+      if (!order.includes(id)) order.push(id);
+    }
+    return new Map(order.map((id, index) => [id, index]));
+  }, [result]);
   const selectedChip = chips.find((chip) => chip.chip_id === selectedId) ?? null;
   const hintedLanes = new Set(selectedChip?.lane_hints ?? []);
   const chipsDisabled = engine.status !== 'ready';
@@ -147,6 +162,7 @@ export function App() {
         highlighted={pathNodes}
         startNodes={startNodes}
         hintedLanes={hintedLanes}
+        rippleIndex={rippleIndex}
         t={t}
       />
 
