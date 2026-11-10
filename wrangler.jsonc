@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "ontographia-plm-demo",
+  "compatibility_date": "2026-11-10",
+  // Assets-only Worker: no `main` script. `not_found_handling` is intentionally
+  // omitted so it defaults to "none" and unknown paths return 404; this app has
+  // no client-side routes, so there is no SPA fallback to index.html.
+  "assets": {
+    "directory": "./dist"
+  }
+}
