@@ -99,7 +99,13 @@ async function main() {
   const server = spawn(
     'npx',
     ['vite', 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
-    { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Own process group so the preview and its esbuild child can be stopped
+      // together; otherwise CI can hang on inherited stdio after the checks pass.
+      detached: process.platform !== 'win32',
+    },
   );
   let serverLog = '';
   server.stdout.on('data', (chunk) => {
@@ -340,12 +346,24 @@ async function main() {
     console.log('smoke OK');
   } finally {
     if (browser) await browser.close();
-    server.kill('SIGTERM');
+    try {
+      if (process.platform !== 'win32' && server.pid) {
+        process.kill(-server.pid, 'SIGTERM');
+      } else {
+        server.kill('SIGTERM');
+      }
+    } catch {
+      server.kill('SIGTERM');
+    }
+    server.stdout.destroy();
+    server.stderr.destroy();
     await delay(200);
   }
 }
 
-main().catch((error) => {
-  console.error('smoke FAILED:', error.message);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error('smoke FAILED:', error.message);
+    process.exit(1);
+  });
