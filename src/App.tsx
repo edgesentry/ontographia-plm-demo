@@ -120,8 +120,8 @@ export function App() {
       {engine.status === 'error' && (
         <div role="alert" className="error-box" data-testid="load-error">
           <p>
-            {t('loadError')}: {engine.message}
-          </p>
+            {t('loadError')}: {engine.message}.
+          </p>{' '}
           <button type="button" onClick={load}>
             {t('retry')}
           </button>

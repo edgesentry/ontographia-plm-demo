@@ -275,11 +275,27 @@ async function main() {
       results: Boolean(document.querySelector('[data-testid="hud-results"]')),
       highlights: document.querySelectorAll('[data-node-id][data-highlighted="true"]').length,
       errorText: document.querySelector('[data-testid="load-error"]')?.textContent ?? '',
+      retryLabel:
+        document.querySelector('[data-testid="load-error"] button')?.textContent?.trim() ?? '',
     }));
     assert(failureState.retry, 'WASM load failure must keep the retry button');
     assert(failureState.chips === 5 && failureState.allChipsDisabled, 'chips must be disabled after WASM load failure');
     assert(!failureState.verified, 'Verified badge leaked after WASM load failure');
     assert(!failureState.results && failureState.highlights === 0, 'stale results/highlights after WASM load failure');
+    const { errorText, retryLabel } = failureState;
+    assert(retryLabel.length > 0, 'WASM load failure must keep the retry label');
+    assert(!/fetchRetry/i.test(errorText), `load-error text glues the exception to Retry: ${errorText}`);
+    const retryIndex = errorText.lastIndexOf(retryLabel);
+    assert(retryIndex > 0, `Retry label must follow the error message: ${JSON.stringify(errorText)}`);
+    const beforeRetry = errorText.slice(0, retryIndex);
+    assert(
+      beforeRetry.trim().length > 0,
+      `load-error text is missing the error message: ${JSON.stringify(errorText)}`,
+    );
+    assert(
+      /[\s.,;:!?、。]$/.test(beforeRetry),
+      `error message and Retry must be separated by punctuation or whitespace: ${JSON.stringify(errorText)}`,
+    );
     await failureContext.close();
 
     const mobile = await context.newPage();

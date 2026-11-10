@@ -40,7 +40,8 @@ export function Hud({ result, error, t }: HudProps) {
 
       {error && (
         <div className="error-box" role="alert" data-testid="hud-error">
-          <strong>{t(error.kind === 'compile' ? 'compileError' : 'executorError')}</strong>
+          <strong>{t('errorHeading')}</strong>
+          <p>{t(error.kind === 'compile' ? 'compileError' : 'executorError')}</p>
           <pre>{error.message}</pre>
         </div>
       )}
