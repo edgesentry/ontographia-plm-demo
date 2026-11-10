@@ -334,6 +334,39 @@ button:disabled {
   box-shadow: inset 4px 0 0 var(--highlight);
 }
 
+/*
+ * One-shot ripple along the Intent traversal path. The static highlight above
+ * is applied immediately and stays; this only adds a fading ring, staggered by
+ * the inline `animation-delay` derived from the 0-based traversal index.
+ */
+.node-card.is-rippling {
+  animation: node-ripple 700ms ease-out both;
+}
+
+@keyframes node-ripple {
+  0% {
+    box-shadow:
+      inset 4px 0 0 var(--highlight),
+      0 0 0 0 rgba(168, 85, 10, 0.55);
+  }
+  45% {
+    box-shadow:
+      inset 4px 0 0 var(--highlight),
+      0 0 0 6px rgba(168, 85, 10, 0.2);
+  }
+  100% {
+    box-shadow:
+      inset 4px 0 0 var(--highlight),
+      0 0 0 10px rgba(168, 85, 10, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node-card.is-rippling {
+    animation: none;
+  }
+}
+
 .node-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.8rem;

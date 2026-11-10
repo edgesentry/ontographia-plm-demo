@@ -23,9 +23,14 @@ const assert = (condition, message) => {
 const expected = {
   affected_products: {
     path: ['DEMO-BRKT-01', 'DEMO-FAN-100', 'DEMO-FAN-200', 'DEMO-FAN-300'],
+    ripple: ['DEMO-BRKT-01', 'DEMO-FAN-100', 'DEMO-FAN-200', 'DEMO-FAN-300'],
     rows: 3,
   },
-  affected_bop: { path: ['OP-BRKT-MOUNT', 'WC-LINE-A'], rows: 1 },
+  affected_bop: {
+    path: ['OP-BRKT-MOUNT', 'WC-LINE-A'],
+    ripple: ['OP-BRKT-MOUNT', 'WC-LINE-A'],
+    rows: 1,
+  },
   affected_customers: {
     path: [
       'DEMO-BRKT-01',
@@ -36,11 +41,27 @@ const expected = {
       'CUST-NA-01',
       'CUST-APAC-01',
     ],
+    // The executor's pathNodeIds insertion order interleaves each assembly with
+    // the customer reached from it; the ripple follows that order (start first).
+    ripple: [
+      'DEMO-BRKT-01',
+      'DEMO-FAN-100',
+      'CUST-EU-01',
+      'DEMO-FAN-200',
+      'CUST-NA-01',
+      'DEMO-FAN-300',
+      'CUST-APAC-01',
+    ],
     rows: 3,
   },
-  alternatives: { path: ['DEMO-BRKT-01', 'DEMO-BRKT-02'], rows: 1 },
+  alternatives: {
+    path: ['DEMO-BRKT-01', 'DEMO-BRKT-02'],
+    ripple: ['DEMO-BRKT-01', 'DEMO-BRKT-02'],
+    rows: 1,
+  },
   residual_risk: {
     path: ['DEMO-ECO-FAN-01', 'DEMO-BRKT-01', 'DEMO-FAN-100', 'DEMO-FAN-200', 'DEMO-FAN-300'],
+    ripple: ['DEMO-ECO-FAN-01', 'DEMO-BRKT-01', 'DEMO-FAN-100', 'DEMO-FAN-200', 'DEMO-FAN-300'],
     rows: 4,
   },
 };
@@ -56,6 +77,17 @@ const snapshot = (page) =>
       highlighted: Array.from(document.querySelectorAll('[data-node-id][data-highlighted="true"]'))
         .map((element) => element.getAttribute('data-node-id'))
         .sort(),
+      ripple: Array.from(document.querySelectorAll('[data-node-id][data-highlighted="true"]')).map(
+        (element) => {
+          const style = getComputedStyle(element);
+          return {
+            id: element.getAttribute('data-node-id'),
+            index: element.getAttribute('data-ripple-index'),
+            start: element.getAttribute('data-ripple-start') === 'true',
+            animationName: style.animationName,
+          };
+        },
+      ),
       intent: document.querySelector('[data-testid="hud-intent"]')?.textContent ?? '',
       cypher: document.querySelector('[data-testid="hud-cypher"]')?.textContent ?? '',
       params: document.querySelector('[data-testid="hud-params"]')?.textContent ?? '',
@@ -207,9 +239,57 @@ async function main() {
       assert(state.params.trim().length > 1, `${chipId} HUD is missing bound parameters`);
       assert(state.intent.trim().startsWith('{'), `${chipId} HUD is missing the resolved Intent`);
       assert(state.rows === expectation.rows, `${chipId} expected ${expectation.rows} rows, got ${state.rows}`);
+
+      const rippleNodes = [...state.ripple].sort(
+        (left, right) => Number(left.index) - Number(right.index),
+      );
+      assert(
+        rippleNodes.length === expectation.ripple.length,
+        `${chipId} expected ${expectation.ripple.length} rippling nodes, got ${rippleNodes.length}`,
+      );
+      assert(
+        rippleNodes.every((node) => node.index !== null),
+        `${chipId} highlighted path node is missing data-ripple-index`,
+      );
+      assert(
+        JSON.stringify(rippleNodes.map((node) => node.index)) ===
+          JSON.stringify(expectation.ripple.map((_, index) => String(index))),
+        `${chipId} data-ripple-index must form 0..${expectation.ripple.length - 1}`,
+      );
+      assert(
+        JSON.stringify(rippleNodes.map((node) => node.id)) === JSON.stringify(expectation.ripple),
+        `${chipId} ripple order mismatch\n  expected: ${expectation.ripple.join(', ')}\n  actual:   ${rippleNodes
+          .map((node) => node.id)
+          .join(', ')}`,
+      );
+      assert(rippleNodes[0].start, `${chipId} start node must carry data-ripple-start and pulse first`);
+      assert(
+        rippleNodes.filter((node) => node.start).length === 1,
+        `${chipId} expected exactly one data-ripple-start node`,
+      );
+      assert(
+        rippleNodes.every((node) => node.animationName === 'node-ripple'),
+        `${chipId} path nodes must carry the ripple animation (got ${rippleNodes
+          .map((node) => node.animationName)
+          .join(', ')})`,
+      );
+
+      if (chipId === 'residual_risk') {
+        assert(
+          results.alternatives?.rippleOrder[0] === 'DEMO-BRKT-01',
+          'alternatives ripple must have started at DEMO-BRKT-01 before the switch',
+        );
+        assert(
+          !state.highlighted.includes('DEMO-BRKT-02'),
+          'residual_risk kept a leftover alternatives highlight after the switch',
+        );
+      }
+
       results[chipId] = {
         rows: state.rows,
         pathNodes: actualPath,
+        rippleOrder: rippleNodes.map((node) => node.id),
+        rippleStart: rippleNodes[0].id,
         verified: state.verified,
         cypherFirstLine: state.cypher.split('\n')[0],
       };
@@ -263,6 +343,57 @@ async function main() {
     });
     assert(externalRequests.length === 0, `outbound request(s) detected: ${externalRequests.join(', ')}`);
     assert(pageErrors.length === 0, `page error(s): ${pageErrors.join(' | ')}`);
+
+    // prefers-reduced-motion: the full static highlight and ripple indices stay,
+    // but no pulse animation is attached.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.click('[data-testid="chip-affected_products"]');
+    await page.waitForFunction(
+      () => {
+        const table = document.querySelector('[data-testid="hud-results"]');
+        const rows = table ? table.querySelectorAll('tbody tr').length : 0;
+        return (
+          Boolean(document.querySelector('[data-testid="verified"]')) &&
+          rows === 3 &&
+          document.querySelectorAll('[data-node-id][data-highlighted="true"]').length > 0
+        );
+      },
+      undefined,
+      { timeout: 10000 },
+    );
+    const reducedMotion = await page.evaluate(() => {
+      const nodes = Array.from(
+        document.querySelectorAll('[data-node-id][data-highlighted="true"]'),
+      );
+      return {
+        highlighted: nodes.map((element) => element.getAttribute('data-node-id')).sort(),
+        missingIndex: nodes.filter((element) => element.getAttribute('data-ripple-index') === null)
+          .length,
+        animation: nodes.map((element) => {
+          const style = getComputedStyle(element);
+          return {
+            id: element.getAttribute('data-node-id'),
+            name: style.animationName,
+            duration: style.animationDuration,
+          };
+        }),
+      };
+    });
+    assert(
+      JSON.stringify(reducedMotion.highlighted) ===
+        JSON.stringify([...expected.affected_products.path].sort()),
+      `reduced motion dropped the static highlight set: ${reducedMotion.highlighted.join(', ')}`,
+    );
+    assert(reducedMotion.missingIndex === 0, 'reduced motion dropped data-ripple-index');
+    assert(
+      reducedMotion.animation.every(
+        (entry) => entry.name === 'none' || entry.duration === '0s',
+      ),
+      `reduced motion must not animate path nodes: ${reducedMotion.animation
+        .map((entry) => `${entry.id}=${entry.name}/${entry.duration}`)
+        .join(', ')}`,
+    );
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
 
     // WASM load failure: retry remains available, chips are disabled, and no
     // success state (Verified badge, results, highlights) leaks through.
@@ -337,6 +468,15 @@ async function main() {
           base,
           browser: launched.mode,
           chips: results,
+          ripple: {
+            orders: Object.fromEntries(
+              Object.entries(results).map(([chipId, result]) => [chipId, result.rippleOrder]),
+            ),
+            reducedMotion: {
+              highlighted: reducedMotion.highlighted,
+              animation: reducedMotion.animation,
+            },
+          },
           languageToggle: {
             from: beforeToggle.lang,
             to: afterToggle.lang,
