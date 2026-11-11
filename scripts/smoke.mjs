@@ -4,7 +4,7 @@
 // Google Chrome channel. Run after `npm run verify` (which produces dist/).
 // Set SMOKE_BASE_URL to check a live deploy instead of spawning `vite preview`.
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 
@@ -19,6 +19,35 @@ const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms)
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
 };
+
+const isExternal = (url) => {
+  const parsed = new URL(url);
+  return (
+    (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.origin !== baseOrigin
+  );
+};
+
+const isModelHost = (url) => {
+  const hostname = new URL(url).hostname;
+  return (
+    hostname === 'huggingface.co' ||
+    hostname === 'hf.co' ||
+    hostname.endsWith('.hf.co') ||
+    hostname === 'raw.githubusercontent.com'
+  );
+};
+
+/** Locate the tiny lazy WebLLM boundary chunk emitted by the production build. */
+function findLazyWebllmChunk() {
+  const assets = join(root, 'dist/assets');
+  if (!existsSync(assets)) throw new Error('dist/assets is missing; run `npm run verify` first');
+  const files = readdirSync(assets).filter((file) => file.endsWith('.js'));
+  const chunk = files.find((file) =>
+    readFileSync(join(assets, file), 'utf8').includes('ontographia-webllm-package-v1'),
+  );
+  if (!chunk) throw new Error('lazy WebLLM chunk not found in dist/assets');
+  return chunk;
+}
 
 const expected = {
   affected_products: {
@@ -203,6 +232,72 @@ async function main() {
     );
     assert(structure.nodes === 18, `expected 18 rendered nodes, got ${structure.nodes}`);
     assert(structure.chips === 5, `expected 5 chips, got ${structure.chips}`);
+
+    // Free-text consent gate. WebGPU capability detection is stubbed on so the
+    // consent card is reachable, but consent is never granted: no model host
+    // and no lazy WebLLM chunk may be requested.
+    const consentContext = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      locale: 'en-US',
+    });
+    await consentContext.addInitScript(() => {
+      Object.defineProperty(navigator, 'gpu', {
+        configurable: true,
+        value: { requestAdapter: async () => ({}) },
+      });
+    });
+    const consentRequests = [];
+    consentContext.on('request', (request) => consentRequests.push(request.url()));
+    const consentPage = await consentContext.newPage();
+    await consentPage.goto(base, { waitUntil: 'load' });
+    await consentPage.waitForSelector('[data-testid="free-text-consent"]', { timeout: 20000 });
+    const consentState = await consentPage.evaluate(() => ({
+      consent: Boolean(document.querySelector('[data-testid="free-text-consent"]')),
+      input: Boolean(document.querySelector('[data-testid="free-text-input"]')),
+      runDisabled: document.querySelector('[data-testid="free-text-run"]')?.disabled ?? null,
+      modelText: document.querySelector('[data-testid="free-text-consent"]')?.textContent ?? '',
+    }));
+    assert(consentState.consent, 'free-text consent gate is missing');
+    assert(consentState.input, 'free-text input is missing before consent');
+    assert(consentState.runDisabled === true, 'free-text run must be disabled before consent');
+    for (const needle of ['Llama-3.2-1B-Instruct-q4f16_1-MLC', '879.04 MB', '695,242,752']) {
+      assert(
+        consentState.modelText.includes(needle),
+        `consent gate must show ${JSON.stringify(needle)}`,
+      );
+    }
+    await consentPage.fill('[data-testid="free-text-input"]', 'Which products are affected?');
+    await consentPage.evaluate(() => {
+      document.querySelector('[data-testid="free-text-run"]')?.click();
+    });
+    await delay(500);
+    const consentModelRequests = consentRequests.filter((url) => isModelHost(url));
+    assert(
+      consentModelRequests.length === 0,
+      `consent gate requested a model host: ${consentModelRequests.join(', ')}`,
+    );
+    assert(
+      !consentRequests.some(
+        (url) => url.includes('webllm-package') || /\/lib-[^/]+\.js$/.test(url),
+      ),
+      `consent gate loaded the lazy WebLLM chunk: ${consentRequests.join(', ')}`,
+    );
+    assert(
+      !consentRequests.some((url) => isExternal(url)),
+      `consent gate made an external request: ${consentRequests.join(', ')}`,
+    );
+    await consentPage.selectOption('[data-testid="lang-toggle"]', 'ja');
+    await consentPage.waitForFunction(() => document.documentElement.lang === 'ja', undefined, {
+      timeout: 5000,
+    });
+    const keptFreeText = await consentPage
+      .locator('[data-testid="free-text-input"]')
+      .inputValue();
+    assert(
+      keptFreeText === 'Which products are affected?',
+      'language toggle cleared in-progress free-text',
+    );
+    await consentContext.close();
 
     const edgeText = (await page.locator('[data-testid="cross-lane-edge"]').allTextContents()).join(' ');
     for (const type of ['ORDERED_BY', 'CONSUMES', 'PRODUCES']) {
@@ -435,6 +530,250 @@ async function main() {
     );
     await failureContext.close();
 
+    // WebGPU missing: free-text is disabled with a ja+en notice, no model is
+    // fetched, and all five chips still run.
+    const noGpuContext = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      locale: 'en-US',
+    });
+    await noGpuContext.addInitScript(() => {
+      Object.defineProperty(navigator, 'gpu', { configurable: true, value: undefined });
+    });
+    const noGpuRequests = [];
+    noGpuContext.on('request', (request) => noGpuRequests.push(request.url()));
+    const noGpuPage = await noGpuContext.newPage();
+    const noGpuErrors = [];
+    noGpuPage.on('pageerror', (error) => noGpuErrors.push(error.message));
+    await noGpuPage.goto(base, { waitUntil: 'load' });
+    await noGpuPage.waitForSelector('[data-testid="webgpu-notice"]', { timeout: 20000 });
+    await noGpuPage.waitForSelector('[data-testid="chip-affected_products"]:not([disabled])', {
+      timeout: 20000,
+    });
+    const noGpuState = await noGpuPage.evaluate(() => ({
+      notice: document.querySelector('[data-testid="webgpu-notice"]')?.textContent ?? '',
+      inputDisabled: document.querySelector('[data-testid="free-text-input"]')?.disabled ?? null,
+      runDisabled: document.querySelector('[data-testid="free-text-run"]')?.disabled ?? null,
+      consent: Boolean(document.querySelector('[data-testid="free-text-consent"]')),
+      chips: document.querySelectorAll('[data-chip-id]').length,
+    }));
+    assert(noGpuState.notice.length > 0, 'WebGPU notice is empty');
+    assert(
+      /WebGPU is not available/.test(noGpuState.notice),
+      'English WebGPU notice is missing',
+    );
+    assert(
+      noGpuState.inputDisabled === true && noGpuState.runDisabled === true,
+      'free-text must be disabled without WebGPU',
+    );
+    assert(!noGpuState.consent, 'the consent card must not appear without WebGPU');
+    assert(noGpuState.chips === 5, `expected 5 chips without WebGPU, got ${noGpuState.chips}`);
+
+    await noGpuPage.selectOption('[data-testid="lang-toggle"]', 'ja');
+    await noGpuPage.waitForFunction(() => document.documentElement.lang === 'ja', undefined, {
+      timeout: 5000,
+    });
+    const noGpuNoticeJa = await noGpuPage.locator('[data-testid="webgpu-notice"]').textContent();
+    assert(
+      noGpuNoticeJa && noGpuNoticeJa.includes('WebGPU を利用できない'),
+      'Japanese WebGPU notice is missing',
+    );
+
+    const noGpuChips = {};
+    for (const [chipId, expectation] of Object.entries(expected)) {
+      await noGpuPage.click(`[data-testid="chip-${chipId}"]`);
+      await noGpuPage.waitForFunction(
+        ({ expectedRows, id }) => {
+          const selected = document.querySelector('.chip.is-selected');
+          const table = document.querySelector('[data-testid="hud-results"]');
+          const rows = table ? table.querySelectorAll('tbody tr').length : 0;
+          return (
+            selected?.getAttribute('data-chip-id') === id &&
+            Boolean(document.querySelector('[data-testid="verified"]')) &&
+            rows === expectedRows
+          );
+        },
+        { expectedRows: expectation.rows, id: chipId },
+        { timeout: 10000 },
+      );
+      const highlighted = await noGpuPage.evaluate(
+        () =>
+          document.querySelectorAll('[data-node-id][data-highlighted="true"]').length,
+      );
+      assert(highlighted > 0, `${chipId} did not highlight nodes without WebGPU`);
+      noGpuChips[chipId] = { rows: expectation.rows, highlighted };
+    }
+    const noGpuModelRequests = noGpuRequests.filter((url) => isModelHost(url));
+    assert(
+      noGpuModelRequests.length === 0,
+      `WebGPU-missing page requested a model host: ${noGpuModelRequests.join(', ')}`,
+    );
+    assert(
+      !noGpuRequests.some((url) => url.includes('webllm-package') || /\/lib-[^/]+\.js$/.test(url)),
+      'WebGPU-missing page loaded the lazy WebLLM chunk',
+    );
+    assert(noGpuErrors.length === 0, `WebGPU-missing page errors: ${noGpuErrors.join(' | ')}`);
+    await noGpuContext.close();
+
+    // Invalid Intent rejected without downloading the model. A test-only route
+    // replaces the tiny lazy WebLLM boundary chunk with a stub; the real
+    // package chunk (lib-*.js) must never be requested.
+    let invalidIntent = null;
+    if (!useLive) {
+      const lazyChunk = findLazyWebllmChunk();
+      const stubSource = [
+        "export const WEBLLM_PACKAGE_TAG = 'ontographia-webllm-package-v1';",
+        'class StubEngine {',
+        '  constructor(config) { this.config = config || {}; }',
+        '  async reload() {',
+        "    if (this.config.initProgressCallback) this.config.initProgressCallback({ progress: 1, text: 'stub model ready' });",
+        '  }',
+        '  async unload() {}',
+        '}',
+        'StubEngine.prototype.chat = { completions: { create: async () => {',
+        '  const output = globalThis.__ONTOGRAPHIA_SMOKE_MODEL_OUTPUT__;',
+        "  return { choices: [{ message: { content: String(output == null ? '' : output) } }] };",
+        '} } };',
+        'export async function createIntentEngine(config) { return new StubEngine(config); }',
+      ].join('\n');
+
+      const invalidContext = await browser.newContext({
+        viewport: { width: 1280, height: 900 },
+        locale: 'en-US',
+      });
+      await invalidContext.addInitScript(() => {
+        Object.defineProperty(navigator, 'gpu', {
+          configurable: true,
+          value: { requestAdapter: async () => ({}) },
+        });
+      });
+      const invalidRequests = [];
+      invalidContext.on('request', (request) => invalidRequests.push(request.url()));
+      await invalidContext.route(`**/assets/${lazyChunk}`, (route) =>
+        route.fulfill({ status: 200, contentType: 'text/javascript', body: stubSource }),
+      );
+      const invalidPage = await invalidContext.newPage();
+      const invalidErrors = [];
+      invalidPage.on('pageerror', (error) => invalidErrors.push(error.message));
+      await invalidPage.goto(base, { waitUntil: 'load' });
+      await invalidPage.waitForSelector('[data-testid="chip-affected_products"]:not([disabled])', {
+        timeout: 20000,
+      });
+
+      await invalidPage.click('[data-testid="free-text-consent-button"]');
+      await invalidPage.fill('[data-testid="free-text-input"]', 'Which products are affected?');
+      await invalidPage.waitForFunction(
+        () => {
+          const run = document.querySelector('[data-testid="free-text-run"]');
+          return Boolean(run) && !run.disabled;
+        },
+        undefined,
+        { timeout: 15000 },
+      );
+
+      const extraKeyIntent = {
+        start: { class: 'Part', alias: 'part' },
+        traverse: [],
+        filter: [
+          { alias: 'part', property: 'part_number', op: 'eq', value: 'DEMO-BRKT-01' },
+        ],
+        return: [{ alias: 'part', property: 'part_number', as_name: 'part_number' }],
+        limit: 20,
+        optional: false,
+        cypher: 'MATCH (n) RETURN n',
+      };
+      const cases = [
+        { label: 'invalid JSON', output: 'not json at all', needle: 'invalid JSON' },
+        { label: 'Cypher string', output: 'MATCH (n) RETURN n', needle: 'invalid JSON' },
+        {
+          label: 'extra key object',
+          output: JSON.stringify(extraKeyIntent),
+          needle: 'unknown key',
+        },
+      ];
+      const invalidRecords = [];
+      for (const testCase of cases) {
+        await invalidPage.click('[data-testid="chip-affected_products"]');
+        await invalidPage.waitForFunction(
+          () =>
+            Boolean(document.querySelector('[data-testid="verified"]')) &&
+            document.querySelectorAll('[data-node-id][data-highlighted="true"]').length > 0,
+          undefined,
+          { timeout: 10000 },
+        );
+        await invalidPage.waitForFunction(
+          () => !document.querySelector('[data-testid="free-text-error"]'),
+          undefined,
+          { timeout: 5000 },
+        );
+
+        await invalidPage.evaluate((output) => {
+          globalThis.__ONTOGRAPHIA_SMOKE_MODEL_OUTPUT__ = output;
+        }, testCase.output);
+        await invalidPage.click('[data-testid="free-text-run"]');
+        await invalidPage.waitForFunction(
+          () => Boolean(document.querySelector('[data-testid="free-text-error"]')),
+          undefined,
+          { timeout: 10000 },
+        );
+        await delay(200);
+        const after = await invalidPage.evaluate(() => ({
+          freeTextError: document.querySelector('[data-testid="free-text-error"]')?.textContent ?? '',
+          hudError: document.querySelector('[data-testid="hud-error"]')?.textContent ?? '',
+          verified: Boolean(document.querySelector('[data-testid="verified"]')),
+          results: Boolean(document.querySelector('[data-testid="hud-results"]')),
+          highlights: document.querySelectorAll('[data-node-id][data-highlighted="true"]').length,
+          runDisabled: document.querySelector('[data-testid="free-text-run"]')?.disabled ?? null,
+        }));
+        assert(!after.verified, `${testCase.label} showed the Verified badge`);
+        assert(!after.results, `${testCase.label} left a results table`);
+        assert(after.highlights === 0, `${testCase.label} left ${after.highlights} highlighted nodes`);
+        assert(
+          after.freeTextError.length > 0 && after.hudError.length > 0,
+          `${testCase.label} did not show both free-text and HUD errors`,
+        );
+        assert(
+          after.freeTextError.includes(testCase.needle),
+          `${testCase.label} error did not mention ${JSON.stringify(testCase.needle)}: ${after.freeTextError}`,
+        );
+        assert(after.runDisabled === false, `${testCase.label} must leave the run action available`);
+        invalidRecords.push({
+          case: testCase.label,
+          error: after.freeTextError.slice(0, 200),
+          verified: after.verified,
+          results: after.results,
+          highlights: after.highlights,
+        });
+      }
+
+      const lastEnError = await invalidPage
+        .locator('[data-testid="free-text-error"]')
+        .textContent();
+      await invalidPage.selectOption('[data-testid="lang-toggle"]', 'ja');
+      await invalidPage.waitForFunction(() => document.documentElement.lang === 'ja', undefined, {
+        timeout: 5000,
+      });
+      const lastJaError = await invalidPage
+        .locator('[data-testid="free-text-error"]')
+        .textContent();
+      assert(
+        lastJaError && lastJaError !== lastEnError && /拒否|失敗|スキーマ/.test(lastJaError),
+        'invalid Intent error did not switch to Japanese',
+      );
+
+      const invalidModelRequests = invalidRequests.filter((url) => isModelHost(url));
+      assert(
+        invalidModelRequests.length === 0,
+        `stub flow requested a model host: ${invalidModelRequests.join(', ')}`,
+      );
+      assert(
+        !invalidRequests.some((url) => /\/lib-[^/]+\.js$/.test(url)),
+        'stub flow fetched the real WebLLM package chunk',
+      );
+      assert(invalidErrors.length === 0, `invalid-Intent page errors: ${invalidErrors.join(' | ')}`);
+      invalidIntent = { lazyChunk, cases: invalidRecords, jaError: lastJaError?.slice(0, 200) };
+      await invalidContext.close();
+    }
+
     const mobile = await context.newPage();
     mobile.on('pageerror', (error) => pageErrors.push(`mobile: ${error.message}`));
     await mobile.setViewportSize({ width: 390, height: 844 });
@@ -489,6 +828,22 @@ async function main() {
           mbom: { nodes: mbomNodes, note: mbomNote.trim() },
           structure,
           wasmFailure: failureState,
+          freeText: {
+            consentGate: consentState,
+            consentRequests: {
+              total: consentRequests.length,
+              external: consentRequests.filter((url) => isExternal(url)).length,
+            },
+            webgpuMissing: {
+              notice: noGpuState.notice,
+              noticeJa: noGpuNoticeJa,
+              inputDisabled: noGpuState.inputDisabled,
+              runDisabled: noGpuState.runDisabled,
+              chips: noGpuChips,
+              requests: noGpuRequests.length,
+            },
+            invalidIntent,
+          },
           wasm: {
             sameOrigin: true,
             responses: wasmResponses.map((response) => ({

@@ -10,7 +10,7 @@ export interface HudResult {
 }
 
 export interface RunError {
-  kind: 'compile' | 'executor';
+  kind: 'compile' | 'executor' | 'invalid';
   message: string;
 }
 
@@ -41,7 +41,15 @@ export function Hud({ result, error, t }: HudProps) {
       {error && (
         <div className="error-box" role="alert" data-testid="hud-error">
           <strong>{t('errorHeading')}</strong>
-          <p>{t(error.kind === 'compile' ? 'compileError' : 'executorError')}</p>
+          <p>
+            {t(
+              error.kind === 'compile'
+                ? 'compileError'
+                : error.kind === 'executor'
+                  ? 'executorError'
+                  : 'invalidIntentError',
+            )}
+          </p>
           <pre>{error.message}</pre>
         </div>
       )}

@@ -7,7 +7,16 @@ Phase 1 (#2) is an **Intent-driven traversal over a vendored fixture graph**. Th
 compiles each chip's Intent into parameter-bound Cypher and the HUD shows that string as an audit
 artifact. **The Cypher is not executed.** Results come from a small in-browser Intent executor
 (`src/lib/executor.ts`) that walks `vendor/ontographia/data/fixtures/deskfan_eol.graph.json`; there is
-no graph database, no server call, and no LLM.
+no graph database, no server call, and no server-side LLM.
+
+Phase 2 (#3) adds an optional **free-text** path. After an explicit consent step, a
+`Llama-3.2-1B-Instruct-q4f16_1-MLC` model runs locally in the browser through
+[`@mlc-ai/web-llm`](https://www.npmjs.com/package/@mlc-ai/web-llm). The model is asked for Intent JSON
+only, never Cypher, and its output is checked against an explicit Intent schema before the existing
+`buildCypher` + `executeIntent` pipeline runs. Invalid JSON, unknown or missing fields, and Cypher
+text are rejected without executing anything. **Prompts are not sent to an external inference API.**
+Only the model files (weights and `model_lib`) are downloaded from the CSP allowlist, and only after
+consent. The chip path never goes through the LLM.
 
 - Four lanes, left to right: **EBOM, MBOM, SBOM, BOP**. The vendored fixture has no MBOM tags or
   nodes, so the MBOM lane is intentionally empty with a "not in this fixture" note.
@@ -32,8 +41,9 @@ same-origin asset.
 
 ## Verify
 
-One command (typecheck, data/i18n checks, WASM smoke, Intent-executor gold tests, package/dist WASM
-integrity, `_headers` checks, production build):
+One command (typecheck, data/i18n checks, WASM smoke, Intent-executor gold tests, Intent-schema
+rejection tests, free-text prompt-set shape, WebLLM prompt/lazy-import guards, package/dist WASM
+integrity, the `_headers` CSP allowlist, production build):
 
 ```bash
 npm run verify
@@ -53,7 +63,49 @@ npm run smoke
 The smoke starts `vite preview`, launches Playwright Chromium (or system Chrome if Chromium is not
 installed), and checks all five chips: highlights, HUD Intent/Cypher/params/results, the Verified
 badge, ja/en toggle state retention, same-origin `application/wasm` fetch, no outbound requests, and
-mobile wrapping without horizontal clipping.
+mobile wrapping without horizontal clipping. It also checks the free-text consent gate (no Hugging
+Face or lazy-model request before consent), the WebGPU-missing notice with a working chip path, and
+rejection of invalid Intent output through a test-only stub of the lazy model chunk. The smoke never
+downloads the model.
+
+### Free-text (in-browser WebLLM)
+
+The free-text panel is off until you choose **Download and load model**. The consent card shows:
+
+| Item | Value |
+| --- | --- |
+| Model | `Llama-3.2-1B-Instruct-q4f16_1-MLC` |
+| GPU memory | 879.04 MB (WebLLM `prebuiltAppConfig.vram_required_MB`) |
+| Download | 695,242,752 bytes, about 695 MB (documented Hugging Face `usedStorage`, not measured here) |
+
+The model chunk and weights are never loaded on first paint. After the first download, a later visit
+can load the browser-cached model without asking for consent again, but it still does not download on
+first paint. Progress and a cancel action are shown while loading. WebGPU is required: when
+`navigator.gpu` is absent or `requestAdapter()` fails, free-text is disabled with a ja/en notice and
+all five chips keep working. There is no CPU, WASM, or server fallback for the model.
+
+The CSP in `public/_headers` allows only same-origin resources plus these exact origins for the
+optional model:
+
+- `https://huggingface.co` — model repository metadata and small model files
+- `https://us.aws.cdn.hf.co` — the observed weight-shard redirect target
+- `https://raw.githubusercontent.com` — the model_lib WebGPU WASM
+
+`worker-src` is `'self' blob:` because WebLLM runs in workers created from blob URLs. `script-src`
+stays `'self' 'wasm-unsafe-eval'`; the npm package is bundled, not loaded from a CDN.
+
+The model runs locally in the tab and the prompt is never sent to an external inference API. The
+system prompt contains the five supported Intent templates (the same vendored gold files) and asks
+the model to copy the closest one; WebLLM's JSON-constrained decoding keeps the output in the Intent
+shape. This is a deliberately closed-set demo, so free-text maps to one of the five chip Intents. The
+explicit schema checker still runs on every output, and anything that fails it (or Cypher text) is
+rejected before compilation or execution.
+
+`vendor/ontographia/data/intents/` has a fixed local prompt set under `src/data/intentPromptSet.ts`
+with at least one Japanese and one English paraphrase for each of the five gold Intents. It is a
+small regression/demo check, **not a benchmark**, and it is not run in CI. `scripts/eval-intents.mjs`
+can run it locally on a WebGPU machine; it downloads the model once and is not part of `npm run
+verify` or `npm run smoke`.
 
 On a machine without Playwright's browser bundle:
 

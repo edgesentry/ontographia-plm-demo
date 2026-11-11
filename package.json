@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "verify": "node scripts/verify.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "eval:intents": "node scripts/eval-intents.mjs",
     "smoke:live": "SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ node scripts/smoke.mjs"
   },
   "engines": {
@@ -16,6 +17,7 @@
   },
   "dependencies": {
     "@edgesentry/ontographia-wasm": "0.1.9",
+    "@mlc-ai/web-llm": "^0.2.88",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

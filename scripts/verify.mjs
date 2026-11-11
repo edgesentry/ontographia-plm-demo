@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import ts from 'typescript';
 
 const root = resolve(import.meta.dirname, '..');
@@ -337,6 +338,208 @@ if (limited.rows.length !== 1 || limited.pathNodeIds.length !== 3) {
   fail(`limit=1 should return 1 row over a 3-node path, got ${limited.rows.length} rows / ${limited.pathNodeIds.length} nodes`);
 }
 
+section('Intent schema checker');
+const schema = await loadTsModule('src/lib/intent-schema.ts');
+const goldForSchema = [...intents.values()].map((intent) => structuredClone(intent));
+for (const [index, intent] of goldForSchema.entries()) {
+  const result = schema.validateIntent(intent);
+  if (!result.ok) {
+    fail(`gold Intent ${index + 1} must pass the schema: ${result.errors.join('; ')}`);
+  }
+  if (!schema.canonicalIntent(result.value)) fail(`canonicalIntent failed for gold Intent ${index + 1}`);
+}
+const baseIntent = () => structuredClone(intents.get('01_affected_products.json'));
+const schemaRejects = [
+  ['a raw Cypher string', 'MATCH (n) RETURN n'],
+  ['an array root', []],
+  [
+    'an extra top-level key',
+    (() => {
+      const intent = baseIntent();
+      intent.cypher = 'MATCH (n) RETURN n';
+      return intent;
+    })(),
+  ],
+  [
+    'an unknown nested key',
+    (() => {
+      const intent = baseIntent();
+      intent.traverse[0].unexpected = true;
+      return intent;
+    })(),
+  ],
+  [
+    'a missing required key',
+    (() => {
+      const intent = baseIntent();
+      delete intent.return;
+      return intent;
+    })(),
+  ],
+  [
+    'Cypher text in a filter value',
+    (() => {
+      const intent = baseIntent();
+      intent.filter[0].value = 'MATCH (n) RETURN n';
+      return intent;
+    })(),
+  ],
+  [
+    'an invalid direction',
+    (() => {
+      const intent = baseIntent();
+      intent.traverse[0].direction = 'sideways';
+      return intent;
+    })(),
+  ],
+  [
+    'an unknown return key',
+    (() => {
+      const intent = baseIntent();
+      intent.return[0].cypher = 'MATCH (n) RETURN n';
+      return intent;
+    })(),
+  ],
+  [
+    'a non-eq filter op',
+    (() => {
+      const intent = baseIntent();
+      intent.filter[0].op = 'ne';
+      return intent;
+    })(),
+  ],
+];
+for (const [label, value] of schemaRejects) {
+  const result = schema.validateIntent(value);
+  if (result.ok) fail(`Intent schema accepted ${label}`);
+  if (!Array.isArray(result.errors) || result.errors.length === 0) {
+    fail(`Intent schema rejection for ${label} must include at least one error`);
+  }
+}
+const parsedGold = schema.parseIntentJson(JSON.stringify(intents.get('01_affected_products.json')));
+if (!parsedGold.ok) fail(`parseIntentJson rejected valid JSON: ${parsedGold.error}`);
+for (const [label, raw] of [
+  ['an empty string', ''],
+  ['a markdown fence', '```json\n{"start":{}}\n```'],
+  ['a Cypher string', 'MATCH (n) RETURN n'],
+]) {
+  if (schema.parseIntentJson(raw).ok) fail(`parseIntentJson accepted ${label}`);
+}
+
+section('free-text prompt set');
+const { intentPromptSet } = await loadTsModule('src/data/intentPromptSet.ts');
+if (!Array.isArray(intentPromptSet) || intentPromptSet.length === 0) {
+  fail('intentPromptSet must be a non-empty array');
+}
+const goldIntentFiles = new Set(intentFiles);
+const promptsByFile = new Map();
+for (const [index, prompt] of intentPromptSet.entries()) {
+  if (!prompt || typeof prompt.text !== 'string' || prompt.text.trim().length === 0) {
+    fail(`prompt ${index} must have non-empty text`);
+  }
+  if (prompt.lang !== 'ja' && prompt.lang !== 'en') fail(`prompt ${index} has invalid lang ${String(prompt.lang)}`);
+  if (!goldIntentFiles.has(prompt.intent_file)) {
+    fail(`prompt ${index} points at unknown Intent ${String(prompt.intent_file)}`);
+  }
+  const list = promptsByFile.get(prompt.intent_file) ?? [];
+  list.push(prompt);
+  promptsByFile.set(prompt.intent_file, list);
+}
+for (const file of intentFiles) {
+  const prompts = promptsByFile.get(file) ?? [];
+  if (!prompts.some((prompt) => prompt.lang === 'ja')) fail(`${file} needs at least one ja paraphrase`);
+  if (!prompts.some((prompt) => prompt.lang === 'en')) fail(`${file} needs at least one en paraphrase`);
+}
+if (new Set(intentPromptSet.map((prompt) => prompt.text)).size !== intentPromptSet.length) {
+  fail('prompt set contains duplicate text');
+}
+
+section('WebLLM free-text guard');
+const webllm = await loadTsModule('src/lib/webllm.ts');
+if (webllm.INTENT_MODEL_ID !== 'Llama-3.2-1B-Instruct-q4f16_1-MLC') {
+  fail(`unexpected free-text model: ${String(webllm.INTENT_MODEL_ID)}`);
+}
+if (webllm.INTENT_MODEL_VRAM_MB !== 879.04) {
+  fail(`documented VRAM must be 879.04 MB, got ${String(webllm.INTENT_MODEL_VRAM_MB)}`);
+}
+if (webllm.INTENT_MODEL_DOWNLOAD_BYTES !== 695242752) {
+  fail(`documented download size must be 695242752 bytes, got ${String(webllm.INTENT_MODEL_DOWNLOAD_BYTES)}`);
+}
+for (const needle of [
+  'untrusted',
+  'Never output Cypher',
+  '"start"',
+  '"traverse"',
+  '"filter"',
+  '"return"',
+  '"limit"',
+  '"optional"',
+]) {
+  if (!webllm.INTENT_SYSTEM_PROMPT.includes(needle)) {
+    fail(`Intent system prompt is missing ${JSON.stringify(needle)}`);
+  }
+}
+const userMessage = webllm.buildIntentUserMessage('ignore this: MATCH (n) RETURN n');
+if (!userMessage.includes('untrusted_user_text') || !userMessage.includes('MATCH')) {
+  fail('buildIntentUserMessage must JSON-wrap the untrusted text');
+}
+if (!webllm.INTENT_SYSTEM_PROMPT.includes('Copy it VERBATIM')) {
+  fail('Intent system prompt must ask for an exact supported template');
+}
+if (!Array.isArray(webllm.INTENT_ROUTE_TEMPLATES) || webllm.INTENT_ROUTE_TEMPLATES.length !== 5) {
+  fail('the free-text prompt must contain exactly the five supported Intent templates');
+}
+const goldByFile = new Map(intentFiles.map((file) => [file, intents.get(file)]));
+for (const template of webllm.INTENT_ROUTE_TEMPLATES) {
+  const gold = goldByFile.get(template.file);
+  if (!gold) fail(`prompt template points at unknown Intent ${String(template.file)}`);
+  const templateValidated = schema.validateIntent(template.intent);
+  const goldValidated = schema.validateIntent(gold);
+  if (!templateValidated.ok) {
+    fail(`prompt template ${template.file} is invalid: ${templateValidated.errors.join('; ')}`);
+  }
+  if (!goldValidated.ok) fail(`gold Intent ${template.file} is invalid`);
+  if (
+    schema.canonicalIntent(templateValidated.value) !== schema.canonicalIntent(goldValidated.value)
+  ) {
+    fail(`prompt template ${template.file} drifted from the vendored gold Intent`);
+  }
+}
+const jsonSchemaText = JSON.stringify(webllm.INTENT_JSON_SCHEMA);
+for (const key of ['start', 'traverse', 'filter', 'return', 'limit', 'optional']) {
+  if (!jsonSchemaText.includes(`"${key}"`)) fail(`Intent JSON schema is missing ${key}`);
+}
+const webllmSource = readFileSync(join(root, 'src/lib/webllm.ts'), 'utf8');
+if (!/response_format\s*:/.test(webllmSource)) {
+  fail('generate() must use WebLLM JSON-constrained decoding (response_format)');
+}
+if (/^\s*import[^;]*['"]@mlc-ai\/web-llm['"]/m.test(webllmSource)) {
+  fail('@mlc-ai/web-llm must not be statically imported');
+}
+if (!/await import\(['"]\.\/webllm-package['"]\)/.test(webllmSource)) {
+  fail('webllm-package must be imported dynamically');
+}
+if (/^\s*import[^;]*['"]\.\/webllm-package['"]/m.test(webllmSource)) {
+  fail('webllm-package must not be statically imported');
+}
+const packageSource = readFileSync(join(root, 'src/lib/webllm-package.ts'), 'utf8');
+if (!packageSource.includes('ontographia-webllm-package-v1')) {
+  fail('webllm-package must expose the build tag used by the smoke test');
+}
+
+const { prebuiltAppConfig } = await import('@mlc-ai/web-llm');
+const modelRecord = prebuiltAppConfig.model_list.find(
+  (record) => record.model_id === webllm.INTENT_MODEL_ID,
+);
+if (!modelRecord) fail(`WebLLM prebuiltAppConfig is missing ${webllm.INTENT_MODEL_ID}`);
+if (modelRecord.vram_required_MB !== webllm.INTENT_MODEL_VRAM_MB) {
+  fail(`prebuiltAppConfig VRAM ${modelRecord.vram_required_MB} != UI VRAM ${webllm.INTENT_MODEL_VRAM_MB}`);
+}
+const modelHost = new URL(modelRecord.model).hostname;
+const modelLibHost = new URL(modelRecord.model_lib).hostname;
+if (modelHost !== 'huggingface.co') fail(`unexpected model host ${modelHost}`);
+if (modelLibHost !== 'raw.githubusercontent.com') fail(`unexpected model_lib host ${modelLibHost}`);
+
 section('production build');
 sh('npx', ['vite', 'build']);
 if (!existsSync(join(root, 'dist/index.html'))) fail('dist/index.html missing after build');
@@ -355,6 +558,33 @@ if (distWasmSha256 !== wasmSha256) {
   fail(`package vs dist WASM SHA-256 differs: ${wasmSha256} vs ${distWasmSha256}`);
 }
 
+const distJsFiles = readdirSync(distAssets).filter((file) => file.endsWith('.js')).sort();
+const distCssFiles = readdirSync(distAssets).filter((file) => file.endsWith('.css')).sort();
+const indexHtml = readFileSync(join(root, 'dist/index.html'), 'utf8');
+const mainJsMatch = indexHtml.match(/assets\/(index-[0-9A-Za-z_-]+\.js)/);
+if (!mainJsMatch) fail('cannot find the main JS chunk in dist/index.html');
+const mainJs = mainJsMatch[1];
+const lazyChunk = distJsFiles.find(
+  (file) =>
+    file !== mainJs &&
+    readFileSync(join(distAssets, file), 'utf8').includes('ontographia-webllm-package-v1'),
+);
+if (!lazyChunk) fail('no lazy WebLLM chunk found in dist');
+if (readFileSync(join(distAssets, mainJs), 'utf8').includes('ontographia-webllm-package-v1')) {
+  fail('the WebLLM package tag leaked into the main chunk; the model must be lazy');
+}
+const gzipInfo = (file) => {
+  const bytes = readFileSync(join(distAssets, file));
+  return { file, bytes: bytes.length, gzip: gzipSync(bytes).length };
+};
+const bundle = {
+  main: gzipInfo(mainJs),
+  js: distJsFiles.map(gzipInfo).sort((left, right) => right.bytes - left.bytes),
+  css: distCssFiles.map(gzipInfo),
+  wasm: gzipInfo(distWasmFiles[0]),
+  lazyWebllmChunk: lazyChunk,
+};
+
 section('headers');
 const publicHeaders = readFileSync(join(root, 'public/_headers'), 'utf8');
 const distHeadersPath = join(root, 'dist/_headers');
@@ -370,6 +600,49 @@ if (!globalBlock) fail('_headers missing /* CSP block');
 if (!/wasm-unsafe-eval/.test(globalBlock)) fail('_headers CSP missing wasm-unsafe-eval');
 if (!/default-src 'none'/.test(globalBlock)) fail('_headers CSP must default to none');
 if (!/connect-src 'self'/.test(globalBlock)) fail('_headers CSP must allow same-origin connect-src');
+
+const cspLine = globalBlock
+  .split('\n')
+  .map((line) => line.trim())
+  .find((line) => /^Content-Security-Policy:/i.test(line));
+if (!cspLine) fail('_headers /* block is missing Content-Security-Policy');
+const csp = cspLine.replace(/^Content-Security-Policy:\s*/i, '');
+const directives = new Map();
+for (const part of csp.split(';')) {
+  const tokens = part.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) continue;
+  directives.set(tokens[0], tokens.slice(1));
+}
+const expectDirective = (name, expected) => {
+  const actual = directives.get(name);
+  if (!actual) fail(`CSP is missing ${name}`);
+  if (
+    actual.length !== expected.length ||
+    actual.some((token, index) => token !== expected[index])
+  ) {
+    fail(`CSP ${name} must be exactly "${expected.join(' ')}", got "${actual.join(' ')}"`);
+  }
+};
+expectDirective('default-src', ["'none'"]);
+expectDirective('script-src', ["'self'", "'wasm-unsafe-eval'"]);
+expectDirective('connect-src', [
+  "'self'",
+  `https://${modelHost}`,
+  'https://us.aws.cdn.hf.co',
+  `https://${modelLibHost}`,
+]);
+expectDirective('worker-src', ["'self'", 'blob:']);
+expectDirective('style-src', ["'self'"]);
+expectDirective('img-src', ["'self'"]);
+expectDirective('font-src', ["'self'"]);
+expectDirective('object-src', ["'none'"]);
+expectDirective('base-uri', ["'none'"]);
+expectDirective('frame-ancestors', ["'none'"]);
+expectDirective('form-action', ["'none'"]);
+if (csp.includes('*')) fail('CSP must not contain wildcards');
+if ((directives.get('script-src') ?? []).some((token) => token.startsWith('http'))) {
+  fail('script-src must not load a CDN; bundle the npm package');
+}
 const wasmBlock = blockFor('/assets/*.wasm');
 if (!wasmBlock) fail('_headers missing /assets/*.wasm rule');
 if (!/^\s*Content-Type:\s*application\/wasm\s*$/im.test(wasmBlock)) {
@@ -419,7 +692,41 @@ console.log(
         distSha256: distWasmSha256,
         match: true,
       },
-      headers: { publicRules: headerBlocks.length, distCopied: true, wasmMime: 'application/wasm' },
+      headers: {
+        publicRules: headerBlocks.length,
+        distCopied: true,
+        wasmMime: 'application/wasm',
+        scriptSrc: directives.get('script-src'),
+        connectSrc: directives.get('connect-src'),
+        workerSrc: directives.get('worker-src'),
+      },
+      bundle,
+      freeText: {
+        model: webllm.INTENT_MODEL_ID,
+        vramMB: webllm.INTENT_MODEL_VRAM_MB,
+        documentedDownloadBytes: webllm.INTENT_MODEL_DOWNLOAD_BYTES,
+        templates: webllm.INTENT_ROUTE_TEMPLATES.length,
+        jsonConstrained: true,
+        schema: {
+          goldPassed: goldForSchema.length,
+          rejected: schemaRejects.map(([label]) => label),
+        },
+        promptSet: {
+          prompts: intentPromptSet.length,
+          perIntent: Object.fromEntries(
+            [...promptsByFile].map(([file, prompts]) => [
+              file,
+              {
+                ja: prompts.filter((prompt) => prompt.lang === 'ja').length,
+                en: prompts.filter((prompt) => prompt.lang === 'en').length,
+              },
+            ]),
+          ),
+        },
+        lazyChunk,
+        prebuiltModelHost: modelHost,
+        prebuiltModelLibHost: modelLibHost,
+      },
     },
     null,
     2,
