@@ -109,6 +109,15 @@ The Worker name must match `name` in `wrangler.jsonc` (`ontographia-plm-demo`), 
 fails. Preview builds can be enabled for non-`main` branches; the default preview command is
 `npx wrangler preview`.
 
+### Checking that a merge went live
+
+Every push to `main` should start a build in the Worker's **Deployments** list. To confirm a merge is
+live, compare the hashed bundle name served at `/` (`assets/index-*.js`) before and after the build,
+then run `npm run smoke:live`. If no new build appears after a merge, the Git connection is not
+triggering builds: in **Settings > Builds**, disconnect and reconnect the repository with the
+production branch `main`, and check that the Cloudflare Workers and Pages GitHub App still has
+access to this repository. Then trigger a build with any new commit on `main`.
+
 ## Data and audit
 
 Demo ontology data (COM, chips, intents, fixtures) lives in `vendor/ontographia/data/` and is kept in
