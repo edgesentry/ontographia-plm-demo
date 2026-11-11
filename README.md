@@ -116,7 +116,9 @@ live, compare the hashed bundle name served at `/` (`assets/index-*.js`) before 
 then run `npm run smoke:live`. If no new build appears after a merge, the Git connection is not
 triggering builds: in **Settings > Builds**, disconnect and reconnect the repository with the
 production branch `main`, and check that the Cloudflare Workers and Pages GitHub App still has
-access to this repository. Then trigger a build with any new commit on `main`.
+access to this repository. The app must be installed on the `edgesentry` organization (not only on a
+personal account) with this repository selected under Repository access; otherwise pushes never reach
+Workers Builds. Reconnecting alone does not start a build; trigger one with any new commit on `main`.
 
 ## Data and audit
 
