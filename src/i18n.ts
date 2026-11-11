@@ -84,8 +84,17 @@ export const messages = {
     freeTextRetry: 'Retry',
     freeTextInputLabel: 'Your question',
     freeTextPlaceholder: 'e.g. Which products are affected by the bracket end of life?',
-    freeTextRun: 'Convert and run',
+    freeTextConvert: 'Convert',
     freeTextGenerating: 'Converting your question in this browser…',
+    freeTextProposalTitle: 'Proposed Intent (not run yet)',
+    freeTextProposalMatched: 'Matches template',
+    freeTextProposalCustom:
+      'Modified / custom Intent: it does not match any of the five supported templates.',
+    freeTextProposalPath: 'Path',
+    freeTextProposalNote:
+      'Nothing has run. Choose Run to execute this Intent, or Cancel to discard the proposal.',
+    freeTextRunIntent: 'Run',
+    freeTextCancelProposal: 'Cancel',
     freeTextRejectedTitle: 'Model output rejected',
     freeTextErrorTitle: 'Free-text failed',
     freeTextRejectedBody:
@@ -186,8 +195,17 @@ export const messages = {
     freeTextRetry: '再試行',
     freeTextInputLabel: '質問',
     freeTextPlaceholder: '例: ブラケットの生産終了で影響を受ける製品は？',
-    freeTextRun: '変換して実行',
+    freeTextConvert: '変換',
     freeTextGenerating: 'このブラウザ内で質問を変換しています…',
+    freeTextProposalTitle: '提案された Intent（未実行）',
+    freeTextProposalMatched: '一致するテンプレート',
+    freeTextProposalCustom:
+      '変更されたカスタム Intent: 5 つの対応テンプレートのいずれにも一致しません。',
+    freeTextProposalPath: '経路',
+    freeTextProposalNote:
+      'まだ何も実行していません。「実行」でこの Intent を実行し、「キャンセル」で提案を破棄します。',
+    freeTextRunIntent: '実行',
+    freeTextCancelProposal: 'キャンセル',
     freeTextRejectedTitle: 'モデル出力を拒否しました',
     freeTextErrorTitle: '自由文の処理に失敗しました',
     freeTextRejectedBody:

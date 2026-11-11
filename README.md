@@ -65,8 +65,11 @@ installed), and checks all five chips: highlights, HUD Intent/Cypher/params/resu
 badge, ja/en toggle state retention, same-origin `application/wasm` fetch, no outbound requests, and
 mobile wrapping without horizontal clipping. It also checks the free-text consent gate (no Hugging
 Face or lazy-model request before consent), the WebGPU-missing notice with a working chip path, and
-rejection of invalid Intent output through a test-only stub of the lazy model chunk. The smoke never
-downloads the model.
+rejection of invalid Intent output through a test-only stub of the lazy model chunk. The same stub
+checks the Convert → Run gate (Convert shows a proposal with no execution, no Verified badge, and no
+highlights until Run), remembered-consent first paint (zero model-host or lazy-chunk requests), and
+Cancel during model loading (returns to the cached view and keeps a finished chip result). The smoke
+never downloads the model.
 
 ### Free-text (in-browser WebLLM)
 
@@ -83,6 +86,14 @@ can load the browser-cached model without asking for consent again, but it still
 first paint. Progress and a cancel action are shown while loading. WebGPU is required: when
 `navigator.gpu` is absent or `requestAdapter()` fails, free-text is disabled with a ja/en notice and
 all five chips keep working. There is no CPU, WASM, or server fallback for the model.
+
+Conversion is a two-step, explicit confirm flow. **Convert** asks the model for Intent JSON, validates
+it, compiles it, and shows a proposal: the matched one of the five templates (with its chip label and
+description) or a "modified / custom Intent" notice, plus the start → traverse path. Nothing runs at
+this point — no Verified badge, no HUD results, and no swimlane highlights. **Run** executes the
+proposal through the existing `buildCypher` + `executeIntent` path; **Cancel** discards it and leaves
+an already-finished result untouched. This confirm step is the gate for schema-valid misrouting; it is
+not a semantic check.
 
 The CSP in `public/_headers` allows only same-origin resources plus these exact origins for the
 optional model:

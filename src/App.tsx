@@ -12,9 +12,19 @@ import { Swimlane } from './components/Swimlane';
 import { messages, type Lang, type MessageKey } from './i18n';
 import { executeIntent } from './lib/executor';
 import { chips, graph, ontology, resolveIntentByPath, type Chip } from './lib/data';
-import { parseIntentJson, validateIntent } from './lib/intent-schema';
+import {
+  canonicalIntent,
+  parseIntentJson,
+  validateIntent,
+  type ValidIntent,
+} from './lib/intent-schema';
 import { loadOntographia, type Ontographia } from './lib/ontographia';
-import { INTENT_MODEL_ID, loadIntentModel, type LoadedIntentModel } from './lib/webllm';
+import {
+  INTENT_MODEL_ID,
+  INTENT_ROUTE_TEMPLATES,
+  loadIntentModel,
+  type LoadedIntentModel,
+} from './lib/webllm';
 
 type EngineState =
   | { status: 'loading' }
@@ -23,8 +33,48 @@ type EngineState =
 
 type GpuLike = { requestAdapter(): Promise<unknown> };
 
+interface CompiledIntent {
+  query: string;
+  params: Record<string, unknown>;
+}
+
+/**
+ * A validated Intent that has been compiled but not executed. It only becomes a
+ * run when the user confirms it in the free-text panel.
+ */
+interface FreeTextProposal {
+  intent: ValidIntent;
+  cypher: CompiledIntent;
+  templateFile: string | null;
+}
+
 const CONSENT_KEY = 'ontographia.freeTextConsent.v1';
 const FREE_TEXT_CHIP_ID = 'free-text';
+
+/** Canonical form of each closed-set template, keyed by gold Intent filename. */
+const TEMPLATE_CANONICAL = new Map<string, string>();
+for (const template of INTENT_ROUTE_TEMPLATES) {
+  const validated = validateIntent(template.intent);
+  if (validated.ok) TEMPLATE_CANONICAL.set(template.file, canonicalIntent(validated.value));
+}
+
+/** Return the gold template this Intent matches exactly, or null when modified. */
+function matchRouteTemplate(intent: ValidIntent): string | null {
+  const canonical = canonicalIntent(intent);
+  for (const [file, expected] of TEMPLATE_CANONICAL) {
+    if (canonical === expected) return file;
+  }
+  return null;
+}
+
+/** Readable start -> traverse summary for the confirm step. */
+function summarizeIntentPath(intent: ValidIntent): string {
+  const parts = [intent.start.class];
+  for (const step of intent.traverse) {
+    parts.push(`${step.relationship} (${step.direction})`, step.to.class);
+  }
+  return parts.join(' → ');
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -74,6 +124,7 @@ export function App() {
   const [freeTextNotice, setFreeTextNotice] = useState<FreeTextNotice>(null);
   const [freeTextError, setFreeTextError] = useState<FreeTextError | null>(null);
   const [freeTextValue, setFreeTextValue] = useState('');
+  const [freeTextProposal, setFreeTextProposal] = useState<FreeTextProposal | null>(null);
   const modelRef = useRef<LoadedIntentModel | null>(null);
   const modelAbortRef = useRef<AbortController | null>(null);
   const modelLoadToken = useRef(0);
@@ -134,6 +185,7 @@ export function App() {
     modelAbortRef.current = abort;
     setFreeTextError(null);
     setFreeTextNotice(null);
+    setFreeTextProposal(null);
     setFreeTextPhase('loading');
     setFreeTextProgress(0);
     setFreeTextProgressText('');
@@ -188,6 +240,7 @@ export function App() {
   const runChip = async (chip: Chip) => {
     if (engine.status !== 'ready') return;
     if (freeTextPhase === 'generating') setFreeTextPhase('ready');
+    setFreeTextProposal(null);
     if (
       freeTextError &&
       (freeTextError.kind === 'invalid' ||
@@ -228,7 +281,7 @@ export function App() {
     }
   };
 
-  const runFreeText = async () => {
+  const runFreeTextConvert = async () => {
     const text = freeTextValue.trim();
     const model = modelRef.current;
     if (!text || !model || freeTextPhase !== 'ready' || engine.status !== 'ready') return;
@@ -238,6 +291,7 @@ export function App() {
     setFreeTextPhase('generating');
     setFreeTextError(null);
     setFreeTextNotice(null);
+    setFreeTextProposal(null);
 
     let raw: string;
     try {
@@ -251,60 +305,88 @@ export function App() {
     }
     if (runToken.current !== token) return;
 
-    // The model output is untrusted. Clear any previous run before deciding
-    // whether it is allowed to compile, so stale highlights never survive.
-    setResult(null);
-    setRunError(null);
-    setSelectedId(null);
+    // Rejection clears any previous run: the model output is untrusted, and a
+    // rejected attempt must never leave stale highlights on screen.
+    const reject = (kind: 'invalid' | 'compile', message: string) => {
+      setResult(null);
+      setRunError(null);
+      setSelectedId(null);
+      setFreeTextPhase('ready');
+      setFreeTextError({ kind, message });
+      setRunError({ kind, message });
+    };
 
     const parsed = parseIntentJson(raw);
     if (!parsed.ok) {
-      setFreeTextPhase('ready');
-      setFreeTextError({ kind: 'invalid', message: parsed.error });
-      setRunError({ kind: 'invalid', message: parsed.error });
+      reject('invalid', parsed.error);
       return;
     }
 
     const validated = validateIntent(parsed.value);
     if (!validated.ok) {
-      const message = validated.errors.join('; ');
-      setFreeTextPhase('ready');
-      setFreeTextError({ kind: 'invalid', message });
-      setRunError({ kind: 'invalid', message });
+      reject('invalid', validated.errors.join('; '));
       return;
     }
 
-    let cypher: { query: string; params: Record<string, unknown> };
+    let cypher: CompiledIntent;
     try {
       cypher = engine.og.buildCypher(ontology, validated.value, {
         dialect: 'cypher25',
         ontologyPathHint: 'plm.native.yaml',
       });
     } catch (error) {
-      const message = errorText(error);
-      setFreeTextPhase('ready');
-      setFreeTextError({ kind: 'compile', message });
-      setRunError({ kind: 'compile', message });
+      reject('compile', errorText(error));
       return;
     }
 
+    // Convert only compiles a proposal. It never calls executeIntent, so no
+    // HUD result, Verified badge, ripple, or highlight is produced yet.
+    setFreeTextPhase('ready');
+    setFreeTextProposal({
+      intent: validated.value,
+      cypher,
+      templateFile: matchRouteTemplate(validated.value),
+    });
+  };
+
+  const runFreeTextProposal = () => {
+    const proposal = freeTextProposal;
+    if (!proposal || engine.status !== 'ready') return;
+
+    const token = runToken.current + 1;
+    runToken.current = token;
+    setFreeTextError(null);
+    setFreeTextNotice(null);
+    // Clear the previous run first so highlights/results never linger into a
+    // new (or failing) run.
+    setResult(null);
+    setRunError(null);
+    setSelectedId(null);
+
     try {
-      const execution = executeIntent(graph, validated.value, ontology);
+      const execution = executeIntent(graph, proposal.intent, ontology);
       if (runToken.current !== token) return;
       setResult({
         chipId: FREE_TEXT_CHIP_ID,
         intent: execution.intent,
-        cypher: cypher.query,
-        params: cypher.params,
+        cypher: proposal.cypher.query,
+        params: proposal.cypher.params,
         execution,
       });
+      setFreeTextProposal(null);
       setFreeTextPhase('ready');
     } catch (error) {
       const message = errorText(error);
+      setFreeTextProposal(null);
       setFreeTextPhase('ready');
       setFreeTextError({ kind: 'executor', message });
       setRunError({ kind: 'executor', message });
     }
+  };
+
+  /** Discard the proposal WITHOUT running it; a finished chip result stays. */
+  const cancelFreeTextProposal = () => {
+    setFreeTextProposal(null);
   };
 
   const pathNodes = useMemo(() => new Set(result?.execution.pathNodeIds ?? []), [result]);
@@ -328,8 +410,34 @@ export function App() {
   const selectedChip = chips.find((chip) => chip.chip_id === selectedId) ?? null;
   const hintedLanes = new Set(selectedChip?.lane_hints ?? []);
   const chipsDisabled = engine.status !== 'ready';
-  const freeTextRunDisabled =
-    engine.status !== 'ready' || freeTextPhase !== 'ready' || freeTextValue.trim().length === 0;
+  const freeTextProposalView = useMemo(() => {
+    if (!freeTextProposal) return null;
+    const chip = freeTextProposal.templateFile
+      ? (chips.find(
+          (candidate) =>
+            (candidate.intent_path.split(/[\\/]/).pop() ?? '') === freeTextProposal.templateFile,
+        ) ?? null)
+      : null;
+    return {
+      path: summarizeIntentPath(freeTextProposal.intent),
+      templateLabel: chip ? (lang === 'ja' ? chip.label_ja : chip.label_en) : null,
+      templateDescription: chip
+        ? lang === 'ja'
+          ? chip.description_ja
+          : chip.description_en
+        : null,
+    };
+  }, [freeTextProposal, lang]);
+  const freeTextConvertDisabled =
+    engine.status !== 'ready' ||
+    freeTextPhase !== 'ready' ||
+    freeTextValue.trim().length === 0 ||
+    freeTextProposal !== null;
+  const changeFreeTextValue = (value: string) => {
+    setFreeTextValue(value);
+    // The proposal belongs to the text that produced it; editing discards it.
+    setFreeTextProposal(null);
+  };
 
   return (
     <main>
@@ -392,13 +500,16 @@ export function App() {
         notice={freeTextNotice}
         error={freeTextError}
         value={freeTextValue}
-        runDisabled={freeTextRunDisabled}
-        onValueChange={setFreeTextValue}
+        convertDisabled={freeTextConvertDisabled}
+        proposal={freeTextProposalView}
+        onValueChange={changeFreeTextValue}
         onConsent={grantConsent}
         onLoad={loadModel}
         onCancel={cancelModelLoad}
         onRetry={loadModel}
-        onRun={runFreeText}
+        onConvert={runFreeTextConvert}
+        onRunProposal={runFreeTextProposal}
+        onCancelProposal={cancelFreeTextProposal}
         t={t}
       />
 

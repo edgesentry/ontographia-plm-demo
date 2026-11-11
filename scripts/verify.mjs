@@ -408,6 +408,55 @@ const schemaRejects = [
       return intent;
     })(),
   ],
+  [
+    'a duplicate traverse alias',
+    (() => {
+      const intent = baseIntent();
+      intent.traverse[0].to.alias = intent.start.alias;
+      return intent;
+    })(),
+  ],
+  [
+    'a filter alias that is not declared',
+    (() => {
+      const intent = baseIntent();
+      intent.filter[0].alias = 'ghost';
+      return intent;
+    })(),
+  ],
+  [
+    'a return alias that is not declared',
+    (() => {
+      const intent = baseIntent();
+      intent.return[0].alias = 'ghost';
+      return intent;
+    })(),
+  ],
+  [
+    'a duplicate return as_name',
+    (() => {
+      const intent = baseIntent();
+      intent.return[1].as_name = intent.return[0].as_name;
+      return intent;
+    })(),
+  ],
+  [
+    'an overlong filter value',
+    (() => {
+      const intent = baseIntent();
+      intent.filter[0].value = 'x'.repeat(161);
+      return intent;
+    })(),
+  ],
+  [
+    'undefined limit and optional',
+    (() => {
+      const intent = baseIntent();
+      intent.limit = undefined;
+      intent.optional = undefined;
+      return intent;
+    })(),
+  ],
 ];
 for (const [label, value] of schemaRejects) {
   const result = schema.validateIntent(value);

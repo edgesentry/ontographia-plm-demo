@@ -19,6 +19,13 @@ export interface FreeTextError {
 
 export type FreeTextNotice = 'cancelled' | null;
 
+/** Read-only view of the compiled Intent awaiting an explicit Run. */
+export interface FreeTextProposalView {
+  path: string;
+  templateLabel: string | null;
+  templateDescription: string | null;
+}
+
 interface FreeTextPanelProps {
   phase: FreeTextPhase;
   progress: number;
@@ -26,13 +33,16 @@ interface FreeTextPanelProps {
   notice: FreeTextNotice;
   error: FreeTextError | null;
   value: string;
-  runDisabled: boolean;
+  convertDisabled: boolean;
+  proposal: FreeTextProposalView | null;
   onValueChange: (value: string) => void;
   onConsent: () => void;
   onLoad: () => void;
   onCancel: () => void;
   onRetry: () => void;
-  onRun: () => void;
+  onConvert: () => void;
+  onRunProposal: () => void;
+  onCancelProposal: () => void;
   t: (key: MessageKey) => string;
 }
 
@@ -59,13 +69,16 @@ export function FreeTextPanel({
   notice,
   error,
   value,
-  runDisabled,
+  convertDisabled,
+  proposal,
   onValueChange,
   onConsent,
   onLoad,
   onCancel,
   onRetry,
-  onRun,
+  onConvert,
+  onRunProposal,
+  onCancelProposal,
   t,
 }: FreeTextPanelProps) {
   const inputDisabled =
@@ -170,6 +183,7 @@ export function FreeTextPanel({
         <div className="error-box" role="alert" data-testid="free-text-error">
           <strong>{t(outputRejected ? 'freeTextRejectedTitle' : 'freeTextErrorTitle')}</strong>
           <p>{t(errorBodyKey(error.kind))}</p>
+          {outputRejected && <p className="muted small">{t('freeTextRejectedBody')}</p>}
           {error.message && <pre>{error.message}</pre>}
           {(error.kind === 'load' || error.kind === 'generate') && (
             <button type="button" data-testid="free-text-retry" onClick={onRetry}>
@@ -195,11 +209,11 @@ export function FreeTextPanel({
           <button
             type="button"
             className="primary"
-            data-testid="free-text-run"
-            disabled={runDisabled}
-            onClick={onRun}
+            data-testid="free-text-convert"
+            disabled={convertDisabled}
+            onClick={onConvert}
           >
-            {t('freeTextRun')}
+            {t('freeTextConvert')}
           </button>
           {phase === 'generating' && (
             <span className="muted small" role="status" data-testid="free-text-status">
@@ -208,6 +222,41 @@ export function FreeTextPanel({
           )}
         </div>
       </div>
+
+      {proposal && (
+        <div className="proposal-box" data-testid="free-text-proposal">
+          <h3>{t('freeTextProposalTitle')}</h3>
+          <p data-testid="free-text-proposal-template">
+            {proposal.templateLabel
+              ? `${t('freeTextProposalMatched')}: ${proposal.templateLabel}`
+              : t('freeTextProposalCustom')}
+          </p>
+          {proposal.templateDescription && (
+            <p className="muted small">{proposal.templateDescription}</p>
+          )}
+          <p className="muted small" data-testid="free-text-proposal-path">
+            {t('freeTextProposalPath')}: <code>{proposal.path}</code>
+          </p>
+          <p className="muted small">{t('freeTextProposalNote')}</p>
+          <div className="free-text-actions">
+            <button
+              type="button"
+              className="primary"
+              data-testid="free-text-proposal-run"
+              onClick={onRunProposal}
+            >
+              {t('freeTextRunIntent')}
+            </button>
+            <button
+              type="button"
+              data-testid="free-text-proposal-cancel"
+              onClick={onCancelProposal}
+            >
+              {t('freeTextCancelProposal')}
+            </button>
+          </div>
+        </div>
+      )}
 
       <p className="muted small">{t('freeTextPrivacy')}</p>
       <p className="muted small">{t('freeTextNoCypher')}</p>

@@ -167,6 +167,11 @@ export function validateIntent(value: unknown): IntentValidation {
 
   checkKeys(value, TOP_KEYS, '', errors);
 
+  // Aliases are bound by `start` and by each `traverse` step, in order. Filters
+  // and returns may only reference an alias declared above them, and every
+  // alias must be unique so a later step cannot shadow an earlier binding.
+  const declaredAliases = new Set<string>();
+
   // start
   const start = value.start;
   if (!isRecord(start)) {
@@ -174,7 +179,8 @@ export function validateIntent(value: unknown): IntentValidation {
   } else {
     checkKeys(start, ['class', 'alias'], 'start', errors);
     readString(start, 'class', 'start', errors, FIELD, 'a class name');
-    readString(start, 'alias', 'start', errors, FIELD, 'an identifier');
+    const startAlias = readString(start, 'alias', 'start', errors, FIELD, 'an identifier');
+    if (startAlias) declaredAliases.add(startAlias);
   }
 
   // traverse
@@ -198,7 +204,13 @@ export function validateIntent(value: unknown): IntentValidation {
       } else {
         checkKeys(to, ['class', 'alias'], `${path}.to`, errors);
         readString(to, 'class', `${path}.to`, errors, FIELD, 'a class name');
-        readString(to, 'alias', `${path}.to`, errors, FIELD, 'an identifier');
+        const toAlias = readString(to, 'alias', `${path}.to`, errors, FIELD, 'an identifier');
+        if (toAlias) {
+          if (declaredAliases.has(toAlias)) {
+            errors.push(`${path}.to.alias: alias "${toAlias}" is already declared`);
+          }
+          declaredAliases.add(toAlias);
+        }
       }
     });
   }
@@ -213,7 +225,10 @@ export function validateIntent(value: unknown): IntentValidation {
         return;
       }
       checkKeys(entry, ['alias', 'property', 'op', 'value'], path, errors);
-      readString(entry, 'alias', path, errors, FIELD, 'an identifier');
+      const filterAlias = readString(entry, 'alias', path, errors, FIELD, 'an identifier');
+      if (filterAlias && !declaredAliases.has(filterAlias)) {
+        errors.push(`${path}.alias: alias "${filterAlias}" is not declared in start or traverse`);
+      }
       readString(entry, 'property', path, errors, FIELD, 'a property name');
       if (entry.op !== 'eq') {
         errors.push(`${path}.op: only "eq" is supported`);
@@ -221,8 +236,12 @@ export function validateIntent(value: unknown): IntentValidation {
       const propertyValue = entry.value;
       let primitive = false;
       if (typeof propertyValue === 'string') {
-        primitive = !CYPHER_PATTERN.test(propertyValue);
-        if (!primitive) errors.push(`${path}.value: Cypher text is not allowed`);
+        if (propertyValue.length > MAX_TEXT) {
+          errors.push(`${path}.value: string is too long`);
+        } else {
+          primitive = !CYPHER_PATTERN.test(propertyValue);
+          if (!primitive) errors.push(`${path}.value: Cypher text is not allowed`);
+        }
       } else if (typeof propertyValue === 'number') {
         primitive = Number.isFinite(propertyValue);
       } else if (typeof propertyValue === 'boolean') {
@@ -236,6 +255,7 @@ export function validateIntent(value: unknown): IntentValidation {
 
   // return
   const returns = readArray(value, 'return', '', errors, MAX_STEPS);
+  const returnNames = new Set<string>();
   if (returns) {
     if (returns.length === 0) errors.push('return: at least one entry is required');
     returns.forEach((entry, index) => {
@@ -252,8 +272,17 @@ export function validateIntent(value: unknown): IntentValidation {
       for (const key of ['alias', 'as_name']) {
         if (!(key in entry)) errors.push(`${path}.${key}: required key is missing`);
       }
-      readString(entry, 'alias', path, errors, FIELD, 'an identifier');
-      readString(entry, 'as_name', path, errors, FIELD, 'an output name');
+      const returnAlias = readString(entry, 'alias', path, errors, FIELD, 'an identifier');
+      if (returnAlias && !declaredAliases.has(returnAlias)) {
+        errors.push(`${path}.alias: alias "${returnAlias}" is not declared in start or traverse`);
+      }
+      const asName = readString(entry, 'as_name', path, errors, FIELD, 'an output name');
+      if (asName) {
+        if (returnNames.has(asName)) {
+          errors.push(`${path}.as_name: duplicate output name "${asName}"`);
+        }
+        returnNames.add(asName);
+      }
       if ('property' in entry) {
         readString(entry, 'property', path, errors, FIELD, 'a property name');
       }
@@ -261,20 +290,18 @@ export function validateIntent(value: unknown): IntentValidation {
   }
 
   // limit
-  if (value.limit !== undefined) {
-    const limit = value.limit;
-    if (
-      typeof limit !== 'number' ||
-      !Number.isInteger(limit) ||
-      limit < 1 ||
-      limit > MAX_LIMIT
-    ) {
-      errors.push(`limit: expected an integer between 1 and ${MAX_LIMIT}`);
-    }
+  const limit = value.limit;
+  if (
+    typeof limit !== 'number' ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > MAX_LIMIT
+  ) {
+    errors.push(`limit: expected an integer between 1 and ${MAX_LIMIT}`);
   }
 
   // optional
-  if (value.optional !== undefined && typeof value.optional !== 'boolean') {
+  if (typeof value.optional !== 'boolean') {
     errors.push('optional: expected a boolean');
   }
 

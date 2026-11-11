@@ -254,7 +254,7 @@ async function main() {
     const consentState = await consentPage.evaluate(() => ({
       consent: Boolean(document.querySelector('[data-testid="free-text-consent"]')),
       input: Boolean(document.querySelector('[data-testid="free-text-input"]')),
-      runDisabled: document.querySelector('[data-testid="free-text-run"]')?.disabled ?? null,
+      runDisabled: document.querySelector('[data-testid="free-text-convert"]')?.disabled ?? null,
       modelText: document.querySelector('[data-testid="free-text-consent"]')?.textContent ?? '',
     }));
     assert(consentState.consent, 'free-text consent gate is missing');
@@ -268,7 +268,7 @@ async function main() {
     }
     await consentPage.fill('[data-testid="free-text-input"]', 'Which products are affected?');
     await consentPage.evaluate(() => {
-      document.querySelector('[data-testid="free-text-run"]')?.click();
+      document.querySelector('[data-testid="free-text-convert"]')?.click();
     });
     await delay(500);
     const consentModelRequests = consentRequests.filter((url) => isModelHost(url));
@@ -298,6 +298,81 @@ async function main() {
       'language toggle cleared in-progress free-text',
     );
     await consentContext.close();
+
+    // Remembered consent (returning visit): the cached view may offer Load, but
+    // first paint must still make zero model-host, HF, raw.githubusercontent,
+    // or lazy WebLLM chunk requests.
+    let rememberedConsent = null;
+    {
+      const cachedContext = await browser.newContext({
+        viewport: { width: 1280, height: 900 },
+        locale: 'en-US',
+      });
+      await cachedContext.addInitScript(() => {
+        Object.defineProperty(navigator, 'gpu', {
+          configurable: true,
+          value: { requestAdapter: async () => ({}) },
+        });
+        try {
+          window.localStorage.setItem(
+            'ontographia.freeTextConsent.v1',
+            'Llama-3.2-1B-Instruct-q4f16_1-MLC',
+          );
+        } catch {
+          // Storage may be unavailable; the assertion below will catch the miss.
+        }
+      });
+      const cachedRequests = [];
+      cachedContext.on('request', (request) => cachedRequests.push(request.url()));
+      const cachedPage = await cachedContext.newPage();
+      const cachedErrors = [];
+      cachedPage.on('pageerror', (error) => cachedErrors.push(error.message));
+      await cachedPage.goto(base, { waitUntil: 'load' });
+      await cachedPage.waitForSelector('[data-testid="free-text-consent"]', { timeout: 20000 });
+      const cachedState = await cachedPage.evaluate(() => ({
+        cachedBody: document.querySelector('[data-testid="free-text-consent"]')?.textContent ?? '',
+        load: Boolean(document.querySelector('[data-testid="free-text-load"]')),
+        consentButton: Boolean(
+          document.querySelector('[data-testid="free-text-consent-button"]'),
+        ),
+        input: Boolean(document.querySelector('[data-testid="free-text-input"]')),
+      }));
+      assert(cachedState.load, 'remembered consent must offer the cached Load action');
+      assert(
+        !cachedState.consentButton,
+        'remembered consent must not ask for consent again',
+      );
+      assert(
+        cachedState.cachedBody.includes('You allowed this model on this browser before'),
+        `remembered consent body is missing: ${cachedState.cachedBody}`,
+      );
+      assert(cachedState.input, 'free-text input is missing on a remembered-consent visit');
+      const cachedModelRequests = cachedRequests.filter((url) => isModelHost(url));
+      assert(
+        cachedModelRequests.length === 0,
+        `remembered-consent first paint requested a model host: ${cachedModelRequests.join(', ')}`,
+      );
+      assert(
+        !cachedRequests.some((url) => /webllm-package|\/lib-[^/]+\.js$/.test(url)),
+        `remembered-consent first paint loaded a lazy model chunk: ${cachedRequests.join(', ')}`,
+      );
+      assert(
+        !cachedRequests.some((url) => isExternal(url)),
+        `remembered-consent first paint made an external request: ${cachedRequests.join(', ')}`,
+      );
+      assert(cachedErrors.length === 0, `remembered-consent page errors: ${cachedErrors.join(' | ')}`);
+      rememberedConsent = {
+        cached: true,
+        requests: {
+          total: cachedRequests.length,
+          external: cachedRequests.filter((url) => isExternal(url)).length,
+          modelHosts: cachedModelRequests.length,
+          lazyChunks: cachedRequests.filter((url) => /webllm-package|\/lib-[^/]+\.js$/.test(url))
+            .length,
+        },
+      };
+      await cachedContext.close();
+    }
 
     const edgeText = (await page.locator('[data-testid="cross-lane-edge"]').allTextContents()).join(' ');
     for (const type of ['ORDERED_BY', 'CONSUMES', 'PRODUCES']) {
@@ -552,7 +627,7 @@ async function main() {
     const noGpuState = await noGpuPage.evaluate(() => ({
       notice: document.querySelector('[data-testid="webgpu-notice"]')?.textContent ?? '',
       inputDisabled: document.querySelector('[data-testid="free-text-input"]')?.disabled ?? null,
-      runDisabled: document.querySelector('[data-testid="free-text-run"]')?.disabled ?? null,
+      runDisabled: document.querySelector('[data-testid="free-text-convert"]')?.disabled ?? null,
       consent: Boolean(document.querySelector('[data-testid="free-text-consent"]')),
       chips: document.querySelectorAll('[data-chip-id]').length,
     }));
@@ -618,6 +693,8 @@ async function main() {
     // replaces the tiny lazy WebLLM boundary chunk with a stub; the real
     // package chunk (lib-*.js) must never be requested.
     let invalidIntent = null;
+    let proposalGate = null;
+    let loadCancel = null;
     if (!useLive) {
       const lazyChunk = findLazyWebllmChunk();
       const stubSource = [
@@ -663,7 +740,7 @@ async function main() {
       await invalidPage.fill('[data-testid="free-text-input"]', 'Which products are affected?');
       await invalidPage.waitForFunction(
         () => {
-          const run = document.querySelector('[data-testid="free-text-run"]');
+          const run = document.querySelector('[data-testid="free-text-convert"]');
           return Boolean(run) && !run.disabled;
         },
         undefined,
@@ -709,7 +786,7 @@ async function main() {
         await invalidPage.evaluate((output) => {
           globalThis.__ONTOGRAPHIA_SMOKE_MODEL_OUTPUT__ = output;
         }, testCase.output);
-        await invalidPage.click('[data-testid="free-text-run"]');
+        await invalidPage.click('[data-testid="free-text-convert"]');
         await invalidPage.waitForFunction(
           () => Boolean(document.querySelector('[data-testid="free-text-error"]')),
           undefined,
@@ -722,11 +799,13 @@ async function main() {
           verified: Boolean(document.querySelector('[data-testid="verified"]')),
           results: Boolean(document.querySelector('[data-testid="hud-results"]')),
           highlights: document.querySelectorAll('[data-node-id][data-highlighted="true"]').length,
-          runDisabled: document.querySelector('[data-testid="free-text-run"]')?.disabled ?? null,
+          proposal: Boolean(document.querySelector('[data-testid="free-text-proposal"]')),
+          runDisabled: document.querySelector('[data-testid="free-text-convert"]')?.disabled ?? null,
         }));
         assert(!after.verified, `${testCase.label} showed the Verified badge`);
         assert(!after.results, `${testCase.label} left a results table`);
         assert(after.highlights === 0, `${testCase.label} left ${after.highlights} highlighted nodes`);
+        assert(!after.proposal, `${testCase.label} showed a proposal for rejected output`);
         assert(
           after.freeTextError.length > 0 && after.hudError.length > 0,
           `${testCase.label} did not show both free-text and HUD errors`,
@@ -735,6 +814,10 @@ async function main() {
           after.freeTextError.includes(testCase.needle),
           `${testCase.label} error did not mention ${JSON.stringify(testCase.needle)}: ${after.freeTextError}`,
         );
+        assert(
+          after.freeTextError.includes('Nothing was compiled or executed'),
+          `${testCase.label} did not render freeTextRejectedBody: ${after.freeTextError}`,
+        );
         assert(after.runDisabled === false, `${testCase.label} must leave the run action available`);
         invalidRecords.push({
           case: testCase.label,
@@ -742,6 +825,7 @@ async function main() {
           verified: after.verified,
           results: after.results,
           highlights: after.highlights,
+          proposal: after.proposal,
         });
       }
 
@@ -772,6 +856,333 @@ async function main() {
       assert(invalidErrors.length === 0, `invalid-Intent page errors: ${invalidErrors.join(' | ')}`);
       invalidIntent = { lazyChunk, cases: invalidRecords, jaError: lastJaError?.slice(0, 200) };
       await invalidContext.close();
+
+      // SF-1: Convert only proposes. Nothing executes (no Verified badge, no
+      // results, no path highlights) until the explicit Run. Cancel discards
+      // the proposal and keeps an already-finished run.
+      const goldProductsIntent = JSON.stringify(
+        JSON.parse(
+          readFileSync(
+            join(root, 'vendor/ontographia/data/intents/01_affected_products.json'),
+            'utf8',
+          ),
+        ),
+      );
+
+      const gateContext = await browser.newContext({
+        viewport: { width: 1280, height: 900 },
+        locale: 'en-US',
+      });
+      await gateContext.addInitScript(() => {
+        Object.defineProperty(navigator, 'gpu', {
+          configurable: true,
+          value: { requestAdapter: async () => ({}) },
+        });
+      });
+      const gateRequests = [];
+      gateContext.on('request', (request) => gateRequests.push(request.url()));
+      await gateContext.route(`**/assets/${lazyChunk}`, (route) =>
+        route.fulfill({ status: 200, contentType: 'text/javascript', body: stubSource }),
+      );
+      const gatePage = await gateContext.newPage();
+      const gateErrors = [];
+      gatePage.on('pageerror', (error) => gateErrors.push(error.message));
+      await gatePage.goto(base, { waitUntil: 'load' });
+      await gatePage.waitForSelector('[data-testid="chip-affected_products"]:not([disabled])', {
+        timeout: 20000,
+      });
+      await gatePage.click('[data-testid="free-text-consent-button"]');
+      await gatePage.fill('[data-testid="free-text-input"]', 'Which products are affected?');
+      await gatePage.waitForFunction(
+        () => {
+          const convert = document.querySelector('[data-testid="free-text-convert"]');
+          return Boolean(convert) && !convert.disabled;
+        },
+        undefined,
+        { timeout: 15000 },
+      );
+      await gatePage.evaluate((output) => {
+        globalThis.__ONTOGRAPHIA_SMOKE_MODEL_OUTPUT__ = output;
+      }, goldProductsIntent);
+      await gatePage.click('[data-testid="free-text-convert"]');
+      await gatePage.waitForSelector('[data-testid="free-text-proposal"]', { timeout: 10000 });
+      const afterConvert = await snapshot(gatePage);
+      assert(!afterConvert.verified, 'Convert showed the Verified badge before Run');
+      assert(
+        afterConvert.rows === 0 && afterConvert.results === '',
+        'Convert left a results table before Run',
+      );
+      assert(
+        afterConvert.highlighted.length === 0,
+        `Convert highlighted ${afterConvert.highlighted.length} nodes before Run`,
+      );
+      const proposalText = await gatePage
+        .locator('[data-testid="free-text-proposal"]')
+        .textContent();
+      assert(
+        proposalText.includes('Which products are affected?'),
+        `proposal did not name the matched template: ${proposalText}`,
+      );
+      assert(
+        !proposalText.includes('Modified / custom Intent'),
+        'a matching gold Intent must not be labelled custom',
+      );
+      const proposalPath = await gatePage
+        .locator('[data-testid="free-text-proposal-path"]')
+        .textContent();
+      for (const needle of ['Part', 'CONTAINS (in)', 'Assembly']) {
+        assert(
+          proposalPath.includes(needle),
+          `proposal path is missing ${JSON.stringify(needle)}: ${proposalPath}`,
+        );
+      }
+
+      await gatePage.selectOption('[data-testid="lang-toggle"]', 'ja');
+      await gatePage.waitForFunction(() => document.documentElement.lang === 'ja', undefined, {
+        timeout: 5000,
+      });
+      const keptProposal = await gatePage.evaluate(() => ({
+        text: document.querySelector('[data-testid="free-text-input"]')?.value ?? '',
+        proposal: Boolean(document.querySelector('[data-testid="free-text-proposal"]')),
+        path: document.querySelector('[data-testid="free-text-proposal-path"]')?.textContent ?? '',
+      }));
+      assert(
+        keptProposal.text === 'Which products are affected?',
+        'language toggle cleared in-progress free-text',
+      );
+      assert(keptProposal.proposal, 'language toggle cleared the pending proposal');
+      assert(keptProposal.path.includes('経路'), 'language toggle did not localize the proposal');
+
+      await gatePage.click('[data-testid="free-text-proposal-run"]');
+      await gatePage.waitForFunction(
+        () => {
+          const table = document.querySelector('[data-testid="hud-results"]');
+          return (
+            Boolean(document.querySelector('[data-testid="verified"]')) &&
+            Boolean(table) &&
+            table.querySelectorAll('tbody tr').length === 3
+          );
+        },
+        undefined,
+        { timeout: 10000 },
+      );
+      const afterRun = await snapshot(gatePage);
+      assert(afterRun.verified, 'Run did not show the Verified badge');
+      assert(afterRun.rows === 3, `Run expected 3 rows, got ${afterRun.rows}`);
+      assert(
+        JSON.stringify(afterRun.highlighted) ===
+          JSON.stringify([...expected.affected_products.path].sort()),
+        `Run highlight mismatch: ${afterRun.highlighted.join(', ')}`,
+      );
+      assert(afterRun.cypher.includes('CYPHER 25'), 'Run HUD is missing compiled Cypher');
+      const proposalAfterRun = await gatePage.evaluate(() =>
+        Boolean(document.querySelector('[data-testid="free-text-proposal"]')),
+      );
+      assert(!proposalAfterRun, 'the proposal must be cleared after Run');
+
+      await gatePage.click('[data-testid="free-text-convert"]');
+      await gatePage.waitForSelector('[data-testid="free-text-proposal"]', { timeout: 10000 });
+      await gatePage.click('[data-testid="free-text-proposal-cancel"]');
+      await gatePage.waitForFunction(
+        () => !document.querySelector('[data-testid="free-text-proposal"]'),
+        undefined,
+        { timeout: 5000 },
+      );
+      const afterCancel = await snapshot(gatePage);
+      assert(afterCancel.verified, 'cancelling a proposal cleared the Verified badge');
+      assert(afterCancel.rows === 3, 'cancelling a proposal cleared the finished results');
+      assert(
+        JSON.stringify(afterCancel.highlighted) === JSON.stringify(afterRun.highlighted),
+        'cancelling a proposal changed the finished highlights',
+      );
+
+      // The same rule applies to a finished chip run: cancelling a proposal
+      // must not clear the selected chip, results, or highlights.
+      await gatePage.click('[data-testid="chip-affected_products"]');
+      await gatePage.waitForFunction(
+        () => {
+          const table = document.querySelector('[data-testid="hud-results"]');
+          const selected = document.querySelector('.chip.is-selected');
+          return (
+            selected?.getAttribute('data-chip-id') === 'affected_products' &&
+            Boolean(document.querySelector('[data-testid="verified"]')) &&
+            Boolean(table) &&
+            table.querySelectorAll('tbody tr').length === 3
+          );
+        },
+        undefined,
+        { timeout: 10000 },
+      );
+      await gatePage.click('[data-testid="free-text-convert"]');
+      await gatePage.waitForSelector('[data-testid="free-text-proposal"]', { timeout: 10000 });
+      await gatePage.click('[data-testid="free-text-proposal-cancel"]');
+      await gatePage.waitForFunction(
+        () => !document.querySelector('[data-testid="free-text-proposal"]'),
+        undefined,
+        { timeout: 5000 },
+      );
+      const afterChipCancel = await snapshot(gatePage);
+      assert(
+        afterChipCancel.selected === 'affected_products' && afterChipCancel.pressed === 'true',
+        'cancelling a proposal cleared the selected chip',
+      );
+      assert(
+        afterChipCancel.verified && afterChipCancel.rows === 3,
+        'cancelling a proposal cleared the finished chip result',
+      );
+      assert(
+        JSON.stringify(afterChipCancel.highlighted) ===
+          JSON.stringify([...expected.affected_products.path].sort()),
+        'cancelling a proposal changed the finished chip highlights',
+      );
+      const gateModelRequests = gateRequests.filter((url) => isModelHost(url));
+      assert(
+        gateModelRequests.length === 0,
+        `proposal flow requested a model host: ${gateModelRequests.join(', ')}`,
+      );
+      assert(
+        !gateRequests.some((url) => /\/lib-[^/]+\.js$/.test(url)),
+        'proposal flow fetched the real WebLLM package chunk',
+      );
+      assert(gateErrors.length === 0, `proposal flow page errors: ${gateErrors.join(' | ')}`);
+      proposalGate = {
+        afterConvert: {
+          verified: afterConvert.verified,
+          rows: afterConvert.rows,
+          highlights: afterConvert.highlighted.length,
+        },
+        matchedTemplate: proposalText.includes('Which products are affected?'),
+        path: proposalPath.trim().slice(0, 200),
+        keptOnLanguageToggle: keptProposal.proposal,
+        afterRun: {
+          verified: afterRun.verified,
+          rows: afterRun.rows,
+          highlights: afterRun.highlighted,
+        },
+        cancelKeptResult: {
+          verified: afterCancel.verified,
+          rows: afterCancel.rows,
+          highlightsKept:
+            JSON.stringify(afterCancel.highlighted) === JSON.stringify(afterRun.highlighted),
+        },
+        cancelKeptChipResult: {
+          chip: afterChipCancel.selected,
+          verified: afterChipCancel.verified,
+          rows: afterChipCancel.rows,
+          highlightsKept:
+            JSON.stringify(afterChipCancel.highlighted) ===
+            JSON.stringify([...expected.affected_products.path].sort()),
+        },
+        requests: {
+          total: gateRequests.length,
+          modelHosts: gateModelRequests.length,
+        },
+      };
+      await gateContext.close();
+
+      // N-4: cancel during model loading returns to the remembered-consent
+      // state and must not clear an already-finished chip result. The stub load
+      // never resolves, so no real model is downloaded.
+      const pendingStubSource = [
+        "export const WEBLLM_PACKAGE_TAG = 'ontographia-webllm-package-v1';",
+        'class StubEngine {',
+        '  constructor(config) { this.config = config || {}; }',
+        '  reload() {',
+        "    if (this.config.initProgressCallback) this.config.initProgressCallback({ progress: 0.42, text: 'stub download pending' });",
+        '    return new Promise(() => {});',
+        '  }',
+        '  async unload() {}',
+        '}',
+        'StubEngine.prototype.chat = { completions: { create: async () => ({ choices: [{ message: { content: "" } }] }) } };',
+        'export async function createIntentEngine(config) { return new StubEngine(config); }',
+      ].join('\n');
+
+      const cancelContext = await browser.newContext({
+        viewport: { width: 1280, height: 900 },
+        locale: 'en-US',
+      });
+      await cancelContext.addInitScript(() => {
+        Object.defineProperty(navigator, 'gpu', {
+          configurable: true,
+          value: { requestAdapter: async () => ({}) },
+        });
+      });
+      const cancelRequests = [];
+      cancelContext.on('request', (request) => cancelRequests.push(request.url()));
+      await cancelContext.route(`**/assets/${lazyChunk}`, (route) =>
+        route.fulfill({ status: 200, contentType: 'text/javascript', body: pendingStubSource }),
+      );
+      const cancelPage = await cancelContext.newPage();
+      const cancelErrors = [];
+      cancelPage.on('pageerror', (error) => cancelErrors.push(error.message));
+      await cancelPage.goto(base, { waitUntil: 'load' });
+      await cancelPage.waitForSelector('[data-testid="chip-affected_products"]:not([disabled])', {
+        timeout: 20000,
+      });
+      await cancelPage.click('[data-testid="chip-affected_products"]');
+      await cancelPage.waitForFunction(
+        () => {
+          const table = document.querySelector('[data-testid="hud-results"]');
+          return (
+            Boolean(document.querySelector('[data-testid="verified"]')) &&
+            Boolean(table) &&
+            table.querySelectorAll('tbody tr').length === 3
+          );
+        },
+        undefined,
+        { timeout: 10000 },
+      );
+      await cancelPage.click('[data-testid="free-text-consent-button"]');
+      await cancelPage.waitForSelector('[data-testid="free-text-progress"]', { timeout: 10000 });
+      await cancelPage.click('[data-testid="free-text-cancel"]');
+      await cancelPage.waitForSelector('[data-testid="free-text-load"]', { timeout: 5000 });
+      const afterLoadCancel = await cancelPage.evaluate(() => ({
+        cached: Boolean(document.querySelector('[data-testid="free-text-load"]')),
+        consentButton: Boolean(
+          document.querySelector('[data-testid="free-text-consent-button"]'),
+        ),
+        cancelled: Boolean(document.querySelector('[data-testid="free-text-cancelled"]')),
+        verified: Boolean(document.querySelector('[data-testid="verified"]')),
+        rows:
+          document.querySelector('[data-testid="hud-results"]')?.querySelectorAll('tbody tr')
+            .length ?? 0,
+        highlights: document.querySelectorAll('[data-node-id][data-highlighted="true"]').length,
+      }));
+      assert(afterLoadCancel.cached, 'load cancel must return to the cached consent view');
+      assert(!afterLoadCancel.consentButton, 'load cancel must not ask for consent again');
+      assert(afterLoadCancel.cancelled, 'load cancel notice is missing');
+      assert(
+        afterLoadCancel.verified && afterLoadCancel.rows === 3,
+        'load cancel cleared the finished chip result',
+      );
+      assert(
+        afterLoadCancel.highlights === expected.affected_products.path.length,
+        `load cancel changed the finished highlights (${afterLoadCancel.highlights})`,
+      );
+      const cancelModelRequests = cancelRequests.filter((url) => isModelHost(url));
+      assert(
+        cancelModelRequests.length === 0,
+        `load-cancel flow requested a model host: ${cancelModelRequests.join(', ')}`,
+      );
+      assert(
+        !cancelRequests.some((url) => /\/lib-[^/]+\.js$/.test(url)),
+        'load-cancel flow fetched the real WebLLM package chunk',
+      );
+      assert(cancelErrors.length === 0, `load-cancel flow page errors: ${cancelErrors.join(' | ')}`);
+      loadCancel = {
+        view: 'cached',
+        notice: afterLoadCancel.cancelled,
+        keptChipResult: {
+          verified: afterLoadCancel.verified,
+          rows: afterLoadCancel.rows,
+          highlights: afterLoadCancel.highlights,
+        },
+        requests: {
+          total: cancelRequests.length,
+          modelHosts: cancelModelRequests.length,
+        },
+      };
+      await cancelContext.close();
     }
 
     const mobile = await context.newPage();
@@ -843,6 +1254,9 @@ async function main() {
               requests: noGpuRequests.length,
             },
             invalidIntent,
+            rememberedConsent,
+            proposalGate,
+            loadCancel,
           },
           wasm: {
             sameOrigin: true,
