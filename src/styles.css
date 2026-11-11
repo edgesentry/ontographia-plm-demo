@@ -555,3 +555,134 @@ th {
     justify-content: space-between;
   }
 }
+
+/* Free-text (in-browser WebLLM) */
+.free-text-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.free-text-form label {
+  font-weight: 700;
+}
+
+.free-text-form textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+
+.free-text-form textarea:disabled {
+  background: #f0f3f7;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.free-text-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0;
+}
+
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+button.primary:hover:not(:disabled) {
+  background: #174c99;
+  border-color: #174c99;
+}
+
+button.primary:disabled {
+  opacity: 0.55;
+}
+
+.notice-box {
+  border: 1px solid #b7cdf0;
+  background: var(--accent-soft);
+  color: #1b3f78;
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.consent-box {
+  border: 1px solid var(--line);
+  background: #fbfcfd;
+  border-radius: 10px;
+  padding: 0.85rem 0.95rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.proposal-box {
+  border: 1px solid #b7cdf0;
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 0.85rem 0.95rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.proposal-box h3 {
+  margin-top: 0;
+}
+
+.free-text-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.6rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.free-text-meta dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.free-text-meta dd {
+  margin: 0.1rem 0 0;
+  font-weight: 700;
+}
+
+.free-text-progress {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.progress-track {
+  height: 0.6rem;
+  background: #e6ebf2;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill {
+    transition: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .free-text-actions button {
+    flex: 1 1 auto;
+  }
+}
