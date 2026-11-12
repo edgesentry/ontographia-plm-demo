@@ -71,6 +71,35 @@ highlights until Run), remembered-consent first paint (zero model-host or lazy-c
 Cancel during model loading (returns to the cached view and keeps a finished chip result). The smoke
 never downloads the model.
 
+### WebGPU model smoke
+
+`npm run smoke` and `npm run verify` never download the model. To check the real download in a
+headed WebGPU browser, run the dedicated script:
+
+```bash
+npm run verify                 # or npm run build, produces dist/
+npm run smoke:webgpu
+```
+
+Against the live deploy, skip `dist/` and `vite preview`:
+
+```bash
+SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ npm run smoke:webgpu
+```
+
+`smoke:webgpu` launches the system Google Chrome channel headed (Chrome's bundled WebGPU/Metal
+adapter, not Playwright's Chromium) and fails if Chrome or a WebGPU adapter is unavailable. It
+clicks the consent button, waits up to four minutes for the model to become ready, and then asserts
+that the model weights came from the Hugging Face model hosts (`huggingface.co`, `*.hf.co`) and the
+`model_lib` WASM came from `raw.githubusercontent.com`, with no failed model-host request and zero
+CSP violations. It does not type a prompt or click Convert/Run, and it exits as soon as the model is
+ready or on the first failure.
+
+Every run uses a fresh temporary Chrome profile that is deleted afterwards, so each run performs the
+full download again (about 695 MB). This needs headed system Chrome with WebGPU (a Mac with Chrome is
+fine). It is not part of `npm run verify`, not part of `npm run smoke`, and not run in CI, because CI
+runners have no WebGPU and must not download the model.
+
 ### Free-text (in-browser WebLLM)
 
 The free-text panel is off until you choose **Download and load model**. The consent card shows:

@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "verify": "node scripts/verify.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:webgpu": "node scripts/smoke-webgpu.mjs",
     "eval:intents": "node scripts/eval-intents.mjs",
     "smoke:live": "SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ node scripts/smoke.mjs"
   },
