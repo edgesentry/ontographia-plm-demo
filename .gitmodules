@@ -1,0 +1,3 @@
+[submodule "farmbot/third_party/farmbot-genesis"]
+	path = farmbot/third_party/farmbot-genesis
+	url = https://github.com/FarmBot-Docs/farmbot-genesis
