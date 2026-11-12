@@ -1,0 +1,4 @@
+# The DuckDB extract is a build output. Keep the .sha256 sidecar tracked.
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp

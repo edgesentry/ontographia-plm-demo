@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "verify": "node scripts/verify.mjs",
+    "test:farmbot": "node --test farmbot/test/extract.test.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:webgpu": "node scripts/smoke-webgpu.mjs",
     "eval:intents": "node scripts/eval-intents.mjs",
@@ -23,6 +24,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@duckdb/node-api": "1.4.5-r.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.3.0",
