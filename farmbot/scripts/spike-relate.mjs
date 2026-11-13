@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Spike (Issue #27, epic #26): can the FarmBot preset-question Intents that
-// Ontographia compiles to Cypher 25 actually run on @relate/relate-wasm?
+// Relate WASM compatibility spike: can the FarmBot preset-question Intents
+// that Ontographia compiles to Cypher 25 actually run on @relate/relate-wasm?
 //
 // This script is a throwaway measurement harness, not production generation
 // code:
@@ -666,7 +666,7 @@ const PROBES = [
   {
     id: 'P2',
     question:
-      'Is `direction: in` from the to_class side rejected at compile time? (#164 evidence)',
+      'Is `direction: in` from the to_class side rejected at compile time? (edgesentry/ontographia#164 evidence)',
     intent: {
       start: { class: 'BomCategory', alias: 'c' },
       traverse: [
@@ -679,7 +679,7 @@ const PROBES = [
   {
     id: 'P3',
     question:
-      'Is a "category -> parts" question expressible as start-on-Part, traverse out, filter the far alias? (#164 workaround)',
+      'Is a "category -> parts" question expressible as start-on-Part, traverse out, filter the far alias? (edgesentry/ontographia#164 workaround)',
     intent: {
       start: { class: 'Part', alias: 'p' },
       traverse: [
@@ -794,7 +794,6 @@ async function main() {
 
   const result = {
     spike: 'farmbot-relate-wasm-compatibility',
-    issue: 27,
     generatedBy: 'farmbot/scripts/spike-relate.mjs',
     versions: {
       node: process.version,

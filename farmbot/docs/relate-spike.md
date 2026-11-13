@@ -1,8 +1,8 @@
-# Relate WASM compatibility spike (Issue #27)
+# Relate WASM compatibility spike
 
 This document records a compatibility spike, not production graph generation.
-It answers one question for epic #26: can the Cypher 25 that Ontographia
-compiles from the FarmBot Intents actually run on `@relate/relate-wasm`?
+It answers one question: can the Cypher 25 that Ontographia compiles from the
+FarmBot Intents actually run on `@relate/relate-wasm`?
 
 Everything below was measured by running `farmbot/scripts/spike-relate.mjs`
 against the DuckDB extract built by `farmbot/scripts/extract.mjs`. No number in
@@ -17,9 +17,9 @@ this document is estimated.
 | `@relate/relate-wasm` | 1.0.1 |
 | DuckDB extract schema | 1, canonical SHA-256 `6c32e7067b21679531fd7b6959670b76dcad461227137c96e54078a70ac3ee84` |
 
-`@relate/relate-wasm` 1.0.0 was not installed or run. The brief makes the 1.0.0
-rerun conditional on a query failing on 1.0.1 for an engine reason; no query
-failed, so the fallback was not triggered.
+`@relate/relate-wasm` 1.0.0 was not installed or run. The 1.0.0 rerun is
+conditional on a query failing on 1.0.1 for an engine reason; no query failed,
+so the rerun did not happen.
 
 ## How the spike runs
 
@@ -35,6 +35,12 @@ The script reads the extract `READ_ONLY`, builds a seed that follows
 and runs it with `db.execute(query, JSON.stringify(params))`. It prints one JSON
 document (and writes the same document to `--out` when given). `--extract`
 selects a different extract file; the default is `farmbot/dist/farmbot.duckdb`.
+
+The script initialises the WASM module with explicit bytes,
+`initRelate({ module_or_path: readFileSync(join(RELATE_DIR, 'relate_bg.wasm')) })`.
+Headless Node callers must pass the WASM bytes this way (or use
+`initSync({ module: ... })`): a bare `init()` fetches `relate_bg.wasm` over a
+`file://` URL, which fails in Node.
 
 Because the native format has no way to say "abstract", abstractness is
 represented by adding every ancestor label to the concrete nodes:
@@ -136,7 +142,7 @@ an envelope with `error: null`. Row counts are the envelope's `rows.length`.
 | Q4 | Kit → HAS_USAGE → Usage → USES_ITEM → Part → IN_CATEGORY → BomCategory; filter category slug | yes | 24 | `null` |
 | Q5 | UnmatchedName → SEEN_IN → Structure; filter status | yes | 17 | `null` |
 | P1 | Part; return the whole node | yes | 3 | `null` |
-| P2 | BomCategory → IN_CATEGORY with `direction: in` to Part (the #164 shape) | no (compile) | — | compile error, not an engine error: `validation error: relationship 'IN_CATEGORY' does not originate from class 'BomCategory'` |
+| P2 | BomCategory → IN_CATEGORY with `direction: in` to Part (the `edgesentry/ontographia#164` shape) | no (compile) | — | compile error, not an engine error: `validation error: relationship 'IN_CATEGORY' does not originate from class 'BomCategory'` |
 | P3 | Part → IN_CATEGORY (`direction: out`) → BomCategory; filter the far category alias | yes | 5 | `null` |
 
 Q2 and Q3 return one row per matching usage line, so a chapter or structure
@@ -241,7 +247,7 @@ table. It compiled and returned 10 rows because the seed puts the `Structure`
 label on every concrete page and container node (33 nodes in total). Nothing in
 the compiler or the engine needed to know that `Structure` is abstract.
 
-### The #164 forward-traversal workaround
+### The `edgesentry/ontographia#164` forward-traversal workaround
 
 `direction: in` is only accepted when the previous node is the relationship's
 `from_class`. P2 starts on `BomCategory` and asks for `IN_CATEGORY` with
@@ -258,23 +264,24 @@ starts on `Part`, traverses `IN_CATEGORY` with `direction: out` and filters
 
 ## Decision
 
-**Use `@relate/relate-wasm` 1.0.1, pinned exactly (`"1.0.1"`, no caret), for the
-rest of epic #26.**
+**Use `@relate/relate-wasm` 1.0.1, pinned exactly (`"1.0.1"`, no caret), for
+later FarmBot graph-generation work.**
 
 Evidence:
 
 - All five preset-question Intents compiled and ran on 1.0.1 with
   `error: null`: Q1 12 rows, Q2 7 rows, Q3 10 rows, Q4 24 rows, Q5 17 rows.
 - The three probes behaved as required: a whole-node return worked (P1, 3
-  rows), the #164 shape was rejected at compile time with the documented
-  message (P2), and the forward-traversal workaround ran (P3, 5 rows).
+  rows), the `edgesentry/ontographia#164` shape was rejected at compile time
+  with the documented message (P2), and the forward-traversal workaround ran
+  (P3, 5 rows).
 - 1.0.1 accepted the exact Cypher 25 text Ontographia emits, including the
   `CYPHER 25` prefix and `$param_N` parameters, without a dialect or vendor
   change.
-- No engine error occurred, so the brief's 1.0.0 fallback was not needed and
-  1.0.0 remains untested.
+- No engine error occurred, so the 1.0.0 fallback was not needed and 1.0.0
+  remains untested.
 
-Open items for the epic, outside this spike: the seed is a hand-built fixture,
-not the A2 generator; row duplication from multi-line usage is visible because
-these Intents do not project DISTINCT; and the pack-row bags still have no
-component edges.
+Open items outside this spike: the seed is a hand-built fixture, not a
+production seed generator; row duplication from multi-line usage is visible
+because these Intents do not project DISTINCT; and the pack-row bags still have
+no component edges.
