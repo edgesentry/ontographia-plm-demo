@@ -1,0 +1,7 @@
+# One part with the structures, usage lines, comparisons and categories
+# reachable from it. Belt has variant options, assembly and packing usage
+# lines, and quantity comparisons in the extract.
+name: part
+output: farmbot.part.seed.json
+scope: part
+part: Belt

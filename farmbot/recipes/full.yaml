@@ -1,0 +1,4 @@
+# The whole graph for the current extract.
+name: full
+output: farmbot.seed.json
+scope: full

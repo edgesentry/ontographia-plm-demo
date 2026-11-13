@@ -22,12 +22,71 @@ or writes to that demo.
 ## Manage the generation logic, not the graph
 
 The repository holds three things: the ontology, the deterministic code that
-turns the extract into graph data (added later), and the digests of the
-extract. The DuckDB file and any graph store are build outputs: they are
-produced in CI and thrown away. Only the digests are committed. A change in
-the graph is therefore always explained by a change in the ontology, the
-generation code, or the pinned source, never by someone editing a store by
-hand.
+turns the extract into graph data (`farmbot/scripts/graph.mjs` and the
+recipes in `farmbot/recipes/`), and the digests of the extract and of the
+generated graph. The DuckDB file and any graph store are build outputs: they
+are produced in CI and thrown away. A change in the graph is therefore always
+explained by a change in the ontology, the generation code, or the pinned
+source, never by someone editing a store by hand.
+
+The UI seed is the one exception. `farmbot/dist/farmbot.seed.json` and its
+sidecar are committed because the deploy build does not run the extract. The
+DuckDB file and any Relate store stay out of git. The tests regenerate the
+seed from a private copy of the extract and fail on any byte difference.
+
+## Graph generation
+
+`farmbot/scripts/graph.mjs` opens the DuckDB extract read-only, reads the
+ontology, and writes a JSON seed plus a digest sidecar:
+
+    npx node farmbot/scripts/graph.mjs --recipe full
+
+The options are `--extract` (default `farmbot/dist/farmbot.duckdb`),
+`--ontology` (default `farmbot/ontology/farmbot.native.yaml`), `--recipe`
+(a name under `farmbot/recipes/` or a path, default `full`) and `--out`
+(default `farmbot/dist/`).
+
+Two recipes ship with the repository:
+
+- `full` writes the whole graph to `farmbot.seed.json`.
+- `part` writes `farmbot.part.seed.json` for the one part named in the recipe
+  (`Belt`). It keeps that part, its category, its variant options, every
+  usage line that references it, every structure that owns one of those usage
+  lines, every usage line owned by those structures, every comparison of the
+  part, and the product variants those usages and comparisons apply to. It
+  never expands through a different part, so a part seed is a strict subgraph
+  of the full seed.
+
+Every concrete node carries its class label and all ancestor labels from the
+ontology. Labels are ordered most specific first: a `PreAssembly` carries
+`PreAssembly`, `ManufacturingContainer`, `Item` and `Structure`, and a
+`QuantityDifference` carries `QuantityDifference`, `QuantityComparison` and
+`Correspondence`. The generator validates each label, property and
+relationship type, including the declared source and target classes, before
+it writes anything, and fails on an undeclared name.
+
+Node ids are stable and derived only from extract keys: `part:<name>`,
+`partvariant:<part_name>@<variant_index>`, `category:<slug>`,
+`productvariant:<code>`, `chapter:<path>`, `preassembly:<path>`,
+`container:<path>` for a kit or carton page,
+`bag:pack:<page>@<table>/<row>/<child>`, `bag:accessory:<page>`,
+`usage:assembly:<page>@<ordinal>`, `usage:preassembly:<page>@<line_number>`,
+`usage:packing:<page>@<table>/<row>/<child>`,
+`comparison:<packing_page>#<part_name>#<version>` and
+`unmatched:<display_name>`. The assembly ordinal counts the page's rows after
+they are sorted, because assembly line numbers are not unique.
+
+The seed is canonical: object keys are sorted, nodes are sorted by id, edges
+are sorted by type, source id and target id, and no clock, host name or
+environment value is read. The sidecar is named `<seed>.sha256` and contains
+one line:
+
+    farmbot-graph-v1 sha256:<64 lowercase hex>
+
+The hash is the SHA-256 of the exact bytes of the seed JSON. The format token
+comes first so a consumer can reject an unknown format before comparing
+hashes. The committed full seed is `farmbot/dist/farmbot.seed.json`, 364867
+bytes, with `farmbot/dist/farmbot.seed.json.sha256` beside it.
 
 ## Class model
 
@@ -185,7 +244,9 @@ quantities.
 
 `Usage.unit` is derived from `packing_item.quantity_standard_unit` or
 `packing_item.quantity_xl_unit`, whichever version the usage applies to. It
-is null for references that carry a bare count.
+is null for references that carry a bare count. When a packing row carries
+both version counts, the usage is not tied to one variant, so `quantity` and
+`unit` are left null and no `APPLIES_TO` edge is emitted.
 
 ### QuantityComparison (`quantity_comparison`)
 
@@ -284,3 +345,12 @@ DuckDB extract. It also compiles a few intents through the WebAssembly
 binding to confirm that the declared relationships produce the expected
 Cypher. When the extract is missing, the test builds it with the existing
 extract script.
+
+The graph test builds its own private copy of the extract, generates the full
+seed twice, and checks byte-identical output and digests. It checks the
+acceptance counts, confirms that every label, property and relationship type
+in the seed is declared and that ancestor labels are present, rebuilds the
+committed seed and digest from scratch, and confirms that an undeclared name
+makes the generator fail. It also runs the part recipe and checks that the
+result is a strict subset of the full graph. `npm run test:farmbot` runs the
+extract, ontology, and graph tests.
