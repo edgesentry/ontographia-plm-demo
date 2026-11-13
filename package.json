@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "verify": "node scripts/verify.mjs",
-    "test:farmbot": "node --test farmbot/test/",
+    "test:farmbot": "node --test 'farmbot/test/*.test.mjs'",
     "smoke": "node scripts/smoke.mjs",
     "smoke:webgpu": "node scripts/smoke-webgpu.mjs",
     "eval:intents": "node scripts/eval-intents.mjs",
