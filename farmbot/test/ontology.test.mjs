@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const ONTOLOGY_PATH = resolve(ROOT, 'farmbot/ontology/farmbot.native.yaml');
 const DOC_PATH = resolve(ROOT, 'farmbot/docs/ontology.md');
-const DB_PATH = resolve(ROOT, 'farmbot/dist/farmbot.duckdb');
 const EXTRACT = resolve(ROOT, 'farmbot/scripts/extract.mjs');
 const WASM_PATH = resolve(
   ROOT,
@@ -169,11 +168,12 @@ async function readRowsFrom(dbPath, sql) {
   }
 }
 
-async function buildPrivateExtract(sql) {
-  // The other FarmBot test file rebuilds the shared extract in its own
-  // process, and the test runner executes files in parallel. When the shared
-  // file is not available yet, build the same extract into a private
-  // directory instead of fighting over one DuckDB file lock.
+async function queryRows(sql) {
+  // The other FarmBot test file builds and reopens the shared
+  // farmbot/dist/farmbot.duckdb in its own process, and the test runner runs
+  // files in parallel. Opening that file here, even read-only, can make the
+  // other file's read-write opens fail on the DuckDB lock. Build the same
+  // extract into a private directory instead and read only that copy.
   const directory = mkdtempSync(join(tmpdir(), 'farmbot-ontology-'));
   try {
     const built = spawnSync(process.execPath, [EXTRACT, '--out', directory], {
@@ -185,31 +185,6 @@ async function buildPrivateExtract(sql) {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-}
-
-function delay(milliseconds) {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
-}
-
-async function queryRows(sql) {
-  // Prefer the shared extract. Reads are retried because a parallel test file
-  // may be rebuilding it, which briefly removes and locks the file.
-  let lastError;
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    if (!existsSync(DB_PATH)) {
-      await delay(250);
-      continue;
-    }
-    try {
-      return await readRowsFrom(DB_PATH, sql);
-    } catch (error) {
-      lastError = error;
-      await delay(250);
-    }
-  }
-  return buildPrivateExtract(sql).catch((error) => {
-    throw lastError ?? error;
-  });
 }
 
 test('every modelled property is a real extract column', async () => {
@@ -262,6 +237,18 @@ const intents = {
     ],
     limit: 20,
   },
+  partCategory: {
+    start: { class: 'Part', alias: 'p' },
+    traverse: [
+      { relationship: 'IN_CATEGORY', direction: 'out', to: { class: 'BomCategory', alias: 'c' } },
+    ],
+    filter: [{ alias: 'c', property: 'slug', op: 'eq', value: 'fasteners-and-hardware' }],
+    return: [
+      { alias: 'p', property: 'name', as_name: 'part' },
+      { alias: 'c', property: 'title', as_name: 'category' },
+    ],
+    limit: 50,
+  },
   quantityDifference: {
     start: { class: 'QuantityDifference', alias: 'd' },
     traverse: [
@@ -296,6 +283,15 @@ test('a kit-to-part intent compiles to parameter-bound Cypher', async () => {
   assert.match(query, /LIMIT 20/);
 
   const bound = Object.entries(params).filter(([, value]) => value === 'M5 x 10mm Screw');
+  assert.equal(bound.length, 1, JSON.stringify(params));
+  assert.ok(query.includes(`$${bound[0][0]}`), query);
+});
+
+test('a part-to-category intent can filter and return category properties', async () => {
+  const { query, params } = await build(intents.partCategory);
+  assert.ok(query.includes('MATCH (p:Part)-[:IN_CATEGORY]->(c:BomCategory)'), query);
+  assert.match(query, /c\.title AS category/);
+  const bound = Object.entries(params).filter(([, value]) => value === 'fasteners-and-hardware');
   assert.equal(bound.length, 1, JSON.stringify(params));
   assert.ok(query.includes(`$${bound[0][0]}`), query);
 });

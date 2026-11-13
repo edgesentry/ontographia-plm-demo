@@ -126,6 +126,15 @@ derivations at the end of this section. Datatypes follow the column types:
 | quantity_standard | integer | `quantity_standard` |
 | quantity_xl | integer | `quantity_xl` |
 
+### BomCategory (`bom_category`)
+
+| Property | Datatype | Column | Notes |
+|---|---|---|---|
+| slug | string | `slug` | Required, unique; the target key for `IN_CATEGORY` |
+| title | string | `title` | |
+| path | string | `path` | |
+| part_count | integer | `part_count` | |
+
 ### ProductVariant (no source table)
 
 | Property | Datatype | Notes |

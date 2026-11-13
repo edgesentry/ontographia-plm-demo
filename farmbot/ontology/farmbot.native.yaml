@@ -193,6 +193,21 @@ properties:
     owner_class: PartVariant
     datatype: integer
 
+  - name: slug
+    owner_class: BomCategory
+    datatype: string
+    required: true
+    unique: true
+  - name: title
+    owner_class: BomCategory
+    datatype: string
+  - name: path
+    owner_class: BomCategory
+    datatype: string
+  - name: part_count
+    owner_class: BomCategory
+    datatype: integer
+
   - name: code
     owner_class: ProductVariant
     datatype: string
