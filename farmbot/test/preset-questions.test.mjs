@@ -11,6 +11,7 @@ import { loadOntographia } from '@edgesentry/ontographia-wasm';
 import initRelate, { RelateDb } from '@relate/relate-wasm';
 import { loadOntology } from '../scripts/graph.mjs';
 import { generate as generateAllowedValues } from '../scripts/allowed-values.mjs';
+import { insertDistinctReturn } from '../../src/farmbot/distinct-return.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
@@ -56,9 +57,10 @@ const ORACLE_PARAMS = {
 };
 
 // Q2 and Q3 project unique owners. Ontographia 0.1.9 cannot emit DISTINCT, so
-// the compiled statement is post-processed here, after compilation and before
-// execution, by inserting DISTINCT into its single RETURN clause. Everything
-// else, including the $param_N placeholders, stays exactly as compiled.
+// the compiled statement is post-processed after compilation and before
+// execution by `insertDistinctReturn`, the shared step in
+// src/farmbot/distinct-return.mjs that the screen also uses. Everything else,
+// including the $param_N placeholders, stays exactly as compiled.
 const DISTINCT_QUESTIONS = new Set([
   'q2-assembly-chapters-for-part.json',
   'q3-structures-for-part.json',
@@ -70,16 +72,6 @@ function tempDir(prefix) {
   const directory = mkdtempSync(join(tmpdir(), prefix));
   temporaryDirectories.push(directory);
   return directory;
-}
-
-function insertDistinctReturn(query) {
-  const returns = query.match(/\nRETURN /g) ?? [];
-  assert.equal(
-    returns.length,
-    1,
-    `expected exactly one RETURN clause in the compiled Cypher, found ${returns.length}`,
-  );
-  return query.replace('\nRETURN ', '\nRETURN DISTINCT ');
 }
 
 function runWire(db, query, params) {

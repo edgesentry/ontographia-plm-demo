@@ -1,0 +1,144 @@
+export type Lang = 'ja' | 'en';
+
+const en = {
+  title: 'FarmBot graph questions',
+  subtitle:
+    'Committed seed, Intents compiled by Ontographia, Cypher executed by Relate — all in this tab',
+  language: 'Language',
+  loadingEngine: 'Loading Ontographia (WASM)…',
+  engineFailed: 'Ontographia (WASM) failed to load',
+  engineLabel: 'Ontographia ABI',
+  retry: 'Retry',
+  questionsHeading: 'Preset questions',
+  questionsHint:
+    'Choose a question, then Run. A selector changes only that Intent’s filter value; the Intent is recompiled on each Run.',
+  q1Label: 'Q1 · Packing differences',
+  q1Question: 'Which parts disagree between the packing list and the BOM?',
+  q2Label: 'Q2 · Assembly chapters for a part',
+  q2Question: 'Which assembly chapters use this part?',
+  q3Label: 'Q3 · Structures a part reaches',
+  q3Question: 'If this part changes, which structures reach it?',
+  q4Label: 'Q4 · Kit parts in a category',
+  q4Question: 'Which kit parts belong to this category?',
+  q5Label: 'Q5 · Unmatched references',
+  q5Question: 'Which references did not resolve to a part page?',
+  selectorPart: 'Part',
+  selectorCategory: 'Category',
+  selectorHint: 'Selector values come only from the committed allowed-values file.',
+  run: 'Run',
+  running: 'Running…',
+  relateIdle: 'Relate (WASM) loads on the first Run. It is not requested on first paint.',
+  relateLoadingSeed: 'Fetching the committed seed and checking its digest…',
+  relateLoadingWasm: 'Loading Relate (WASM)…',
+  relateSeeding: 'Loading the seed into in-memory Relate…',
+  relateReady: 'Relate is ready. The seed lives in memory for this tab only.',
+  relateTrapped: 'Relate trapped. This instance is not reused; reload the page.',
+  digestLabel: 'Expected seed digest',
+  receivedDigestLabel: 'Verified seed digest',
+  sourcePinLabel: 'Source pin',
+  seedBytesLabel: 'Seed bytes served',
+  statementsLabel: 'Seed load statements',
+  resultHeading: 'Answer',
+  intentLabel: 'Intent',
+  executedCypherLabel: 'Executed Cypher',
+  paramsLabel: 'Bound parameters',
+  rowsHeading: 'Relate rows',
+  noRows: 'No rows. The statement ran and matched nothing.',
+  distinctNote:
+    'This statement received a post-compile RETURN DISTINCT step because Ontographia 0.1.9 cannot express DISTINCT. The compiler output itself had no DISTINCT; Q1, Q4 and Q5 are not modified.',
+  quantityNote: 'Quantity differences are reported, not corrected, and not explained.',
+  compileError: 'Ontographia could not compile the Intent. Nothing was executed.',
+  seedFetchError: 'The committed seed could not be fetched. Nothing was loaded into Relate.',
+  seedDigestError:
+    'The seed bytes do not match the committed digest. Nothing was loaded into Relate.',
+  digestExpectedLabel: 'Expected',
+  digestActualLabel: 'Received',
+  relateLoadError: 'Relate (WASM) could not be loaded. Nothing was executed.',
+  relateQueryError: 'Relate returned an engine error. No rows are shown from any other source.',
+  wasmTrapError:
+    'Relate trapped (a WebAssembly failure). The instance is not reused; reload the page to continue.',
+  limitError: 'The result reached the Intent limit, so this answer may be truncated. No rows are shown.',
+  limitNote: 'limit',
+  rowsFoundNote: 'rows returned',
+  aboutHeading: 'Committed artifacts',
+  aboutBody:
+    'The seed, the five Intents, the ontology, the allowed-values file and their digests are committed files. The page fetches the seed bytes, checks the digest with Web Crypto, then loads them into an in-memory Relate database.',
+  limitLabel: 'Intent limit',
+  parentEntry: 'Desk-fan demo',
+} as const;
+
+const ja: Record<keyof typeof en, string> = {
+  title: 'FarmBot グラフの質問',
+  subtitle:
+    'コミット済みシード、Ontographia がコンパイルした Intent、Relate が実行する Cypher — すべてこのタブ内で完結します',
+  language: '言語',
+  loadingEngine: 'Ontographia (WASM) を読み込み中…',
+  engineFailed: 'Ontographia (WASM) の読み込みに失敗しました',
+  engineLabel: 'Ontographia ABI',
+  retry: '再試行',
+  questionsHeading: 'プリセットの質問',
+  questionsHint:
+    '質問を選んで実行してください。セレクタはその Intent のフィルタ値だけを変更し、実行のたびに再コンパイルします。',
+  q1Label: 'Q1 · 梱包リストとの数量差',
+  q1Question: '梱包リストと BOM で数量が一致しない部品はどれですか？',
+  q2Label: 'Q2 · 部品を使う組立チャプタ',
+  q2Question: 'この部品を使う組立チャプタはどれですか？',
+  q3Label: 'Q3 · 部品が到達する構造',
+  q3Question: 'この部品が変わると、どの構造に到達しますか？',
+  q4Label: 'Q4 · カテゴリに属するキット部品',
+  q4Question: 'このカテゴリに属するキット部品はどれですか？',
+  q5Label: 'Q5 · 未解決の参照',
+  q5Question: '部品ページに解決できなかった参照はどれですか？',
+  selectorPart: '部品',
+  selectorCategory: 'カテゴリ',
+  selectorHint: 'セレクタの値はコミット済みの許可値ファイルからのみ取得します。',
+  run: '実行',
+  running: '実行中…',
+  relateIdle:
+    'Relate (WASM) は最初の実行時に読み込みます。初回描画時には要求しません。',
+  relateLoadingSeed: 'コミット済みシードを取得し、ダイジェストを検証しています…',
+  relateLoadingWasm: 'Relate (WASM) を読み込み中…',
+  relateSeeding: 'シードをメモリ上の Relate に読み込んでいます…',
+  relateReady: 'Relate の準備ができました。シードはこのタブのメモリ内だけに存在します。',
+  relateTrapped:
+    'Relate がトラップしました。このインスタンスは再利用しません。ページを再読み込みしてください。',
+  digestLabel: '期待するシードのダイジェスト',
+  receivedDigestLabel: '検証済みシードのダイジェスト',
+  sourcePinLabel: 'ソースのピン',
+  seedBytesLabel: '配信されたシードのバイト数',
+  statementsLabel: 'シード読み込みステートメント数',
+  resultHeading: '回答',
+  intentLabel: 'Intent',
+  executedCypherLabel: '実行された Cypher',
+  paramsLabel: 'バインドされたパラメータ',
+  rowsHeading: 'Relate の行',
+  noRows: '0 行です。ステートメントは実行され、一致するものはありませんでした。',
+  distinctNote:
+    'このステートメントには、Ontographia 0.1.9 が DISTINCT を表現できないため、コンパイル後の RETURN DISTINCT ステップを適用しています。コンパイラの出力自体に DISTINCT はなく、Q1・Q4・Q5 は変更していません。',
+  quantityNote: '数量差は報告するだけで、訂正も説明も行いません。',
+  compileError: 'Ontographia が Intent をコンパイルできませんでした。実行は行っていません。',
+  seedFetchError:
+    'コミット済みシードを取得できませんでした。Relate には何も読み込んでいません。',
+  seedDigestError:
+    'シードのバイト列がコミット済みのダイジェストと一致しません。Relate には何も読み込んでいません。',
+  digestExpectedLabel: '期待値',
+  digestActualLabel: '実際の値',
+  relateLoadError: 'Relate (WASM) を読み込めませんでした。実行は行っていません。',
+  relateQueryError:
+    'Relate がエンジンエラーを返しました。他の情報源から行を表示することはありません。',
+  wasmTrapError:
+    'Relate がトラップしました（WebAssembly の障害）。インスタンスは再利用しません。続けるにはページを再読み込みしてください。',
+  limitError:
+    '結果が Intent の上限に達したため、切り詰められている可能性があります。行は表示しません。',
+  limitNote: '上限',
+  rowsFoundNote: '行が返されました',
+  aboutHeading: 'コミット済みの成果物',
+  aboutBody:
+    'シード、5 つの Intent、オントロジー、許可値ファイルとそのダイジェストはコミット済みのファイルです。ページはシードのバイト列を取得し、Web Crypto でダイジェストを検証してから、メモリ上の Relate データベースに読み込みます。',
+  limitLabel: 'Intent の上限',
+  parentEntry: 'デスクファンのデモ',
+};
+
+export const messages = { en, ja };
+
+export type MessageKey = keyof typeof en;

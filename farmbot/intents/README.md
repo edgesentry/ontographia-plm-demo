@@ -3,7 +3,8 @@
 Five Intents, one per preset question, compiled by `@edgesentry/ontographia-wasm`
 0.1.9 against `farmbot/ontology/farmbot.native.yaml` and executed by
 `@relate/relate-wasm` 1.0.1 against the committed seed
-`farmbot/dist/farmbot.seed.json` in `farmbot/test/preset-questions.test.mjs`.
+`farmbot/dist/farmbot.seed.json` in `farmbot/test/preset-questions.test.mjs`
+and on the `/farmbot/` screen.
 Each file under `farmbot/oracle/` is an independent SQL answer over the DuckDB
 extract and returns the same column names as its Intent.
 
@@ -74,11 +75,13 @@ owners.
 
 Ontographia 0.1.9 cannot express `DISTINCT`: the Intent schema has no such
 field (unknown keys are rejected) and the Cypher 25 emitter writes `RETURN`
-without `DISTINCT`. For Q2 and Q3 only, the test applies a post-compile step
-before execution: it replaces the statement's single `\nRETURN ` with
+without `DISTINCT`. For Q2 and Q3 only, a post-compile step runs before
+execution: it replaces the statement's single `\nRETURN ` with
 `\nRETURN DISTINCT ` and leaves every other byte, including the `$param_N`
-placeholders, exactly as compiled. The step lives in the test file as
-`insertDistinctReturn`; nothing in the ontology or the compiler changes.
+placeholders, exactly as compiled. The step is
+`insertDistinctReturn` in `src/farmbot/distinct-return.mjs`, shared by the
+preset-question tests and the `/farmbot/` screen so the rewrite cannot drift;
+nothing in the ontology or the compiler changes.
 
 The test asserts that the raw compiler output for Q2 and Q3 does not contain
 `DISTINCT`, that the executed statement does, and that the returned rows are

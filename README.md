@@ -43,7 +43,7 @@ same-origin asset.
 
 One command (typecheck, data/i18n checks, WASM smoke, Intent-executor gold tests, Intent-schema
 rejection tests, free-text prompt-set shape, WebLLM prompt/lazy-import guards, package/dist WASM
-integrity, the `_headers` CSP allowlist, production build):
+integrity, the FarmBot seed copy, the `_headers` CSP allowlist, production build of both entries):
 
 ```bash
 npm run verify
@@ -52,6 +52,27 @@ npm run verify
 The WASM smoke compiles all five Intents plus a malformed Intent (must reject) and checks that an ABI
 other than `1` is rejected. The gold tests assert the fixture paths for all five chips, an
 empty-result filter, malformed Intents, unsupported filter ops, and `limit`.
+
+### FarmBot preset-question screen (`/farmbot/`)
+
+A second Vite entry (`farmbot/index.html` → `src/farmbot/main.tsx`) serves a screen at `/farmbot/`
+with the five FarmBot preset questions from `farmbot/intents/`. A Run compiles the selected Intent
+with the same Ontographia package against `farmbot/ontology/farmbot.native.yaml`, applies the
+documented post-compile `RETURN DISTINCT` step for Q2 and Q3 only (Ontographia 0.1.9 cannot express
+`DISTINCT`; see `farmbot/intents/README.md`), and executes the parameter-bound Cypher in an in-memory
+`new RelateDb()` seeded from the committed graph. Every string is Japanese and English.
+
+The seed is fetched as raw bytes from `/farmbot/farmbot.seed.json` (copied from
+`farmbot/dist/farmbot.seed.json` by a small Vite plugin, so there is no second committed copy) and its
+SHA-256 is checked with Web Crypto before parsing; a mismatch stops the run and loads nothing.
+`@relate/relate-wasm` and its WASM asset are imported only on the first Run, so first paint of
+`/farmbot/` requests neither.
+
+`npm run test:farmbot` includes tests for the digest guard, the shared `RETURN DISTINCT` step, the
+ontology endpoint parser, the seed loader, and the five default questions. `npm run verify` builds
+both entries and checks that `dist/farmbot/index.html` exists, that the served seed is byte-identical
+to the committed seed, that both WASM assets match their installed packages by SHA-256, and that the
+FarmBot entry's first-paint chunks contain no Relate engine code.
 
 ### Browser smoke
 
