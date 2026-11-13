@@ -1,0 +1,338 @@
+{
+  "format": "farmbot-default-results-v1",
+  "seedDigest": "farmbot-graph-v1 sha256:db6503e0c17d024d610736b0996c98a2872b495936d4f84230747db603f36fb1",
+  "seedBytes": 364867,
+  "questions": [
+    {
+      "id": "q1",
+      "intentFile": "q1-packing-differences.json",
+      "columns": [
+        "part",
+        "packing_minus_part"
+      ],
+      "rowCount": 12,
+      "rows": [
+        {
+          "packing_minus_part": -3,
+          "part": "M5 x 30mm Screw"
+        },
+        {
+          "packing_minus_part": -3,
+          "part": "M5 x 30mm Screw"
+        },
+        {
+          "packing_minus_part": -8,
+          "part": "M3 Locknut"
+        },
+        {
+          "packing_minus_part": -8,
+          "part": "M3 Locknut"
+        },
+        {
+          "packing_minus_part": 12,
+          "part": "40mm Nut Bar"
+        },
+        {
+          "packing_minus_part": 13,
+          "part": "M5 x 16mm Screw"
+        },
+        {
+          "packing_minus_part": 13,
+          "part": "M5 x 16mm Screw"
+        },
+        {
+          "packing_minus_part": 25,
+          "part": "M5 x 10mm Screw"
+        },
+        {
+          "packing_minus_part": 4,
+          "part": "40mm Nut Bar"
+        },
+        {
+          "packing_minus_part": 4,
+          "part": "60mm Nut Bar"
+        },
+        {
+          "packing_minus_part": 5,
+          "part": "M3 x 12mm Screw"
+        },
+        {
+          "packing_minus_part": 5,
+          "part": "M3 x 12mm Screw"
+        }
+      ]
+    },
+    {
+      "id": "q2",
+      "intentFile": "q2-assembly-chapters-for-part.json",
+      "columns": [
+        "chapter",
+        "chapter_path",
+        "part"
+      ],
+      "rowCount": 2,
+      "rows": [
+        {
+          "chapter": "cross-slide-and-z-axis",
+          "chapter_path": "v1.7/assembly/cross-slide-and-z-axis.md",
+          "part": "M5 x 10mm Screw"
+        },
+        {
+          "chapter": "gantry",
+          "chapter_path": "v1.7/assembly/gantry.md",
+          "part": "M5 x 10mm Screw"
+        }
+      ]
+    },
+    {
+      "id": "q3",
+      "intentFile": "q3-structures-for-part.json",
+      "columns": [
+        "structure",
+        "part"
+      ],
+      "rowCount": 7,
+      "rows": [
+        {
+          "part": "M5 Flange Locknut",
+          "structure": "v1.7/assembly/cross-slide-and-z-axis.md"
+        },
+        {
+          "part": "M5 Flange Locknut",
+          "structure": "v1.7/assembly/gantry.md"
+        },
+        {
+          "part": "M5 Flange Locknut",
+          "structure": "v1.7/manufacturing/packing/hardware-kit.md"
+        },
+        {
+          "part": "M5 Flange Locknut",
+          "structure": "v1.7/manufacturing/pre-assembly/tools/rotary-tool.md"
+        },
+        {
+          "part": "M5 Flange Locknut",
+          "structure": "v1.7/manufacturing/pre-assembly/tools/seeder.md"
+        },
+        {
+          "part": "M5 Flange Locknut",
+          "structure": "v1.7/manufacturing/pre-assembly/tools/soil-sensor.md"
+        },
+        {
+          "part": "M5 Flange Locknut",
+          "structure": "v1.7/manufacturing/pre-assembly/tools/watering-nozzle.md"
+        }
+      ]
+    },
+    {
+      "id": "q4",
+      "intentFile": "q4-kit-parts-for-category.json",
+      "columns": [
+        "kit",
+        "category",
+        "part"
+      ],
+      "rowCount": 24,
+      "rows": [
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "100mm Nut Bar"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "100mm Zip Tie"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "140mm Nut Bar"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "200mm Zip Tie"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "20mm Nut Bar"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "40mm Nut Bar"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "60mm Nut Bar"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "Eccentric Spacer"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M3 Locknut"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M3 Locknut"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M3 x 12mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M3 x 12mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M3 x 6mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M3 x 6mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M5 Flange Locknut"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M5 Flange Locknut"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M5 x 10mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M5 x 10mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M5 x 16mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M5 x 16mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M5 x 30mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "M5 x 30mm Screw"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "Standard Spacer"
+        },
+        {
+          "category": "fasteners-and-hardware",
+          "kit": "v1.7/manufacturing/packing/hardware-kit.md",
+          "part": "Standard Spacer"
+        }
+      ]
+    },
+    {
+      "id": "q5",
+      "intentFile": "q5-unmatched-references.json",
+      "columns": [
+        "display_name",
+        "page"
+      ],
+      "rowCount": 17,
+      "rows": [
+        {
+          "display_name": "Barb",
+          "page": "v1.7/manufacturing/pre-assembly/tools/utm.md"
+        },
+        {
+          "display_name": "Crop Stickers",
+          "page": "v1.7/manufacturing/packing/hardware-kit.md"
+        },
+        {
+          "display_name": "Getting Started Guide",
+          "page": "v1.7/manufacturing/packing/hardware-kit.md"
+        },
+        {
+          "display_name": "Luer Lock Needle w/ cover (16 Gauge)",
+          "page": "v1.7/manufacturing/pre-assembly/tools/seeder.md"
+        },
+        {
+          "display_name": "Luer Lock Needle w/ cover (19 Gauge)",
+          "page": "v1.7/manufacturing/pre-assembly/tools/seeder.md"
+        },
+        {
+          "display_name": "M5 to Luer Lock Adapter",
+          "page": "v1.7/manufacturing/pre-assembly/tools/seeder.md"
+        },
+        {
+          "display_name": "Magnets",
+          "page": "v1.7/manufacturing/pre-assembly/tools/seeder.md"
+        },
+        {
+          "display_name": "Magnets",
+          "page": "v1.7/manufacturing/pre-assembly/tools/soil-sensor.md"
+        },
+        {
+          "display_name": "Magnets",
+          "page": "v1.7/manufacturing/pre-assembly/tools/watering-nozzle.md"
+        },
+        {
+          "display_name": "PTFE Tape",
+          "page": "v1.7/manufacturing/packing/hardware-kit.md"
+        },
+        {
+          "display_name": "Ring Magnet",
+          "page": "v1.7/manufacturing/pre-assembly/tools/utm.md"
+        },
+        {
+          "display_name": "Tee Nuts",
+          "page": "v1.7/manufacturing/packing/hardware-kit.md"
+        },
+        {
+          "display_name": "Wood Screws",
+          "page": "v1.7/manufacturing/packing/hardware-kit.md"
+        },
+        {
+          "display_name": "X-Profile O-Ring",
+          "page": "v1.7/manufacturing/pre-assembly/tools/utm.md"
+        },
+        {
+          "display_name": "wood screws",
+          "page": "v1.7/assembly/electronics.md"
+        },
+        {
+          "display_name": "wood screws",
+          "page": "v1.7/assembly/toolbays.md"
+        },
+        {
+          "display_name": "wood screws",
+          "page": "v1.7/assembly/tracks.md"
+        }
+      ]
+    }
+  ]
+}
