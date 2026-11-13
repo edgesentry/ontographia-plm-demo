@@ -1,0 +1,18 @@
+{
+  "start": { "class": "UnmatchedName", "alias": "name" },
+  "traverse": [
+    {
+      "relationship": "SEEN_IN",
+      "direction": "out",
+      "to": { "class": "Structure", "alias": "structure" }
+    }
+  ],
+  "filter": [
+    { "alias": "name", "property": "status", "op": "eq", "value": "unmatched" }
+  ],
+  "return": [
+    { "alias": "name", "property": "display_name", "as_name": "display_name" },
+    { "alias": "structure", "property": "path", "as_name": "page" }
+  ],
+  "limit": 100
+}

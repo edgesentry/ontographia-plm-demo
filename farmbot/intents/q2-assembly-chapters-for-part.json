@@ -1,0 +1,24 @@
+{
+  "start": { "class": "AssemblyChapter", "alias": "chapter" },
+  "traverse": [
+    {
+      "relationship": "HAS_USAGE",
+      "direction": "out",
+      "to": { "class": "Usage", "alias": "usage" }
+    },
+    {
+      "relationship": "USES_ITEM",
+      "direction": "out",
+      "to": { "class": "Part", "alias": "part" }
+    }
+  ],
+  "filter": [
+    { "alias": "part", "property": "name", "op": "eq", "value": "M5 x 10mm Screw" }
+  ],
+  "return": [
+    { "alias": "chapter", "property": "chapter", "as_name": "chapter" },
+    { "alias": "chapter", "property": "path", "as_name": "chapter_path" },
+    { "alias": "part", "property": "name", "as_name": "part" }
+  ],
+  "limit": 100
+}

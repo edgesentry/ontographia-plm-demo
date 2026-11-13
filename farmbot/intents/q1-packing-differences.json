@@ -1,0 +1,15 @@
+{
+  "start": { "class": "QuantityDifference", "alias": "difference" },
+  "traverse": [
+    {
+      "relationship": "COMPARES_PART",
+      "direction": "out",
+      "to": { "class": "Part", "alias": "part" }
+    }
+  ],
+  "return": [
+    { "alias": "part", "property": "name", "as_name": "part" },
+    { "alias": "difference", "property": "packing_minus_part", "as_name": "packing_minus_part" }
+  ],
+  "limit": 100
+}
