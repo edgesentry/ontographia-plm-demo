@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@duckdb/node-api": "1.4.5-r.1",
+    "@relate/relate-wasm": "1.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.3.0",
