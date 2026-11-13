@@ -135,6 +135,15 @@ if (!existsSync(wasmPath)) fail(`WASM missing from package at ${wasmPath}`);
 const wasmBytes = readFileSync(wasmPath);
 const wasmSha256 = sha256(wasmBytes);
 
+section('Relate WASM package');
+const relatePkgDir = dirname(require.resolve('@relate/relate-wasm'));
+const relatePkg = JSON.parse(readFileSync(join(relatePkgDir, 'package.json'), 'utf8'));
+if (relatePkg.version !== '1.0.1') fail(`expected @relate/relate-wasm 1.0.1, got ${relatePkg.version}`);
+const relateWasmPath = join(relatePkgDir, 'relate_bg.wasm');
+if (!existsSync(relateWasmPath)) fail(`Relate WASM missing from package at ${relateWasmPath}`);
+const relateWasmBytes = readFileSync(relateWasmPath);
+const relateWasmSha256 = sha256(relateWasmBytes);
+
 const binding = await import('@edgesentry/ontographia-wasm');
 const og = await binding.loadOntographia(wasmBytes);
 const { assertAbiVersion } = await loadTsModule('src/lib/abi.ts');
@@ -589,22 +598,87 @@ const modelLibHost = new URL(modelRecord.model_lib).hostname;
 if (modelHost !== 'huggingface.co') fail(`unexpected model host ${modelHost}`);
 if (modelLibHost !== 'raw.githubusercontent.com') fail(`unexpected model_lib host ${modelLibHost}`);
 
+section('FarmBot artifacts');
+const farmbotSeedGuard = await import('../src/farmbot/seed-digest.mjs');
+const committedSeedPath = join(root, 'farmbot/dist/farmbot.seed.json');
+const committedSeedBytes = readFileSync(committedSeedPath);
+const farmbotSeedHex = sha256(committedSeedBytes);
+if (farmbotSeedHex !== farmbotSeedGuard.SEED_SHA256_HEX) {
+  fail(
+    `the digest guard in src/farmbot/seed-digest.mjs must be the committed seed SHA-256: ${farmbotSeedHex} vs ${farmbotSeedGuard.SEED_SHA256_HEX}`,
+  );
+}
+const committedSeedSidecar = readFileSync(`${committedSeedPath}.sha256`, 'utf8').trim();
+if (committedSeedSidecar !== farmbotSeedGuard.SEED_DIGEST) {
+  fail(`committed seed sidecar is stale: ${committedSeedSidecar}`);
+}
+if (!committedSeedSidecar.endsWith(`sha256:${farmbotSeedHex}`)) {
+  fail('committed seed sidecar does not describe the committed seed bytes');
+}
+
+const farmbotI18n = await loadTsModule('src/farmbot/i18n.ts');
+const farmbotEnKeys = Object.keys(farmbotI18n.messages.en);
+const farmbotJaKeys = Object.keys(farmbotI18n.messages.ja);
+if (farmbotEnKeys.join('|') !== farmbotJaKeys.join('|')) {
+  fail('FarmBot ja/en i18n key sets or order differ');
+}
+if (farmbotEnKeys.length === 0) fail('FarmBot i18n has no messages');
+for (const [lang, block] of Object.entries(farmbotI18n.messages)) {
+  for (const [key, value] of Object.entries(block)) {
+    if (typeof value !== 'string' || !value.trim()) fail(`empty FarmBot i18n string ${lang}.${key}`);
+  }
+}
+for (const key of ['q1Label', 'q2Label', 'q3Label', 'q4Label', 'q5Label', 'distinctNote', 'quantityNote']) {
+  if (!farmbotI18n.messages.en[key] || !farmbotI18n.messages.ja[key]) {
+    fail(`missing FarmBot ja/en message ${key}`);
+  }
+}
+
 section('production build');
 sh('npx', ['vite', 'build']);
 if (!existsSync(join(root, 'dist/index.html'))) fail('dist/index.html missing after build');
+if (!existsSync(join(root, 'dist/farmbot/index.html'))) fail('dist/farmbot/index.html missing after build');
+
 const distAssets = join(root, 'dist/assets');
 const distWasmFiles = existsSync(distAssets)
-  ? readdirSync(distAssets).filter((file) => file.endsWith('.wasm'))
+  ? readdirSync(distAssets)
+      .filter((file) => file.endsWith('.wasm'))
+      .sort()
   : [];
-if (distWasmFiles.length !== 1) fail(`expected 1 built .wasm asset, got ${distWasmFiles.length}`);
-const distWasmPath = join(distAssets, distWasmFiles[0]);
-const distWasmBytes = readFileSync(distWasmPath);
-const distWasmSha256 = sha256(distWasmBytes);
+const wasmShaByFile = new Map(
+  distWasmFiles.map((file) => [file, sha256(readFileSync(join(distAssets, file)))]),
+);
+const ontographiaDistFiles = distWasmFiles.filter(
+  (file) => wasmShaByFile.get(file) === wasmSha256,
+);
+const relateDistFiles = distWasmFiles.filter((file) => wasmShaByFile.get(file) === relateWasmSha256);
+if (ontographiaDistFiles.length !== 1) {
+  fail(`expected exactly 1 built Ontographia .wasm asset, got ${ontographiaDistFiles.length}`);
+}
+if (relateDistFiles.length !== 1) {
+  fail(`expected exactly 1 built Relate .wasm asset, got ${relateDistFiles.length}`);
+}
+for (const file of distWasmFiles) {
+  const digest = wasmShaByFile.get(file);
+  if (digest !== wasmSha256 && digest !== relateWasmSha256) {
+    fail(`unexpected .wasm asset in dist/assets: ${file} (${digest})`);
+  }
+}
+const distWasmAsset = ontographiaDistFiles[0];
+const relateDistAsset = relateDistFiles[0];
+const distWasmBytes = readFileSync(join(distAssets, distWasmAsset));
+const distWasmSha256 = wasmShaByFile.get(distWasmAsset);
 if (distWasmBytes.length !== wasmBytes.length) {
   fail(`package vs dist WASM byte size differs: ${wasmBytes.length} vs ${distWasmBytes.length}`);
 }
 if (distWasmSha256 !== wasmSha256) {
   fail(`package vs dist WASM SHA-256 differs: ${wasmSha256} vs ${distWasmSha256}`);
+}
+const relateDistBytes = readFileSync(join(distAssets, relateDistAsset));
+if (relateDistBytes.length !== relateWasmBytes.length) {
+  fail(
+    `package vs dist Relate WASM byte size differs: ${relateWasmBytes.length} vs ${relateDistBytes.length}`,
+  );
 }
 
 const distJsFiles = readdirSync(distAssets).filter((file) => file.endsWith('.js')).sort();
@@ -630,9 +704,47 @@ const bundle = {
   main: gzipInfo(mainJs),
   js: distJsFiles.map(gzipInfo).sort((left, right) => right.bytes - left.bytes),
   css: distCssFiles.map(gzipInfo),
-  wasm: gzipInfo(distWasmFiles[0]),
+  wasm: gzipInfo(distWasmAsset),
+  relateWasm: gzipInfo(relateDistAsset),
   lazyWebllmChunk: lazyChunk,
 };
+
+section('FarmBot entry');
+const farmbotHtml = readFileSync(join(root, 'dist/farmbot/index.html'), 'utf8');
+const htmlChunkRefs = (html) =>
+  [...html.matchAll(/(?:src|href)="([^"]+\.js)"/g)].map((match) => basename(match[1]));
+const farmbotFirstPaintChunks = htmlChunkRefs(farmbotHtml);
+if (farmbotFirstPaintChunks.length === 0) {
+  fail('dist/farmbot/index.html references no JS chunk');
+}
+// The entry's own chunks and preloads must not carry the Relate glue or its
+// WASM URL; the engine may only arrive through the dynamic import on a Run.
+const RELATE_MARKERS = ['relate_bg', 'relatedb_execute'];
+for (const chunk of farmbotFirstPaintChunks) {
+  const text = readFileSync(join(distAssets, chunk), 'utf8');
+  for (const marker of RELATE_MARKERS) {
+    if (text.includes(marker)) {
+      fail(`dist/farmbot/index.html references ${chunk}, which contains ${marker}; Relate must load lazily`);
+    }
+  }
+}
+const relateLazyChunk = distJsFiles.find((file) =>
+  readFileSync(join(distAssets, file), 'utf8').includes('relate_bg'),
+);
+if (!relateLazyChunk) fail('no lazy Relate chunk found in dist');
+if (farmbotFirstPaintChunks.includes(relateLazyChunk)) {
+  fail('the lazy Relate chunk is referenced by dist/farmbot/index.html; it must load only on demand');
+}
+
+const servedSeedPath = join(root, 'dist/farmbot/farmbot.seed.json');
+if (!existsSync(servedSeedPath)) fail('dist/farmbot/farmbot.seed.json missing after build');
+const servedSeedBytes = readFileSync(servedSeedPath);
+if (!servedSeedBytes.equals(committedSeedBytes)) {
+  fail('the served FarmBot seed is not byte-identical to farmbot/dist/farmbot.seed.json');
+}
+if (sha256(servedSeedBytes) !== farmbotSeedHex) {
+  fail(`served FarmBot seed SHA-256 differs from the committed digest: ${sha256(servedSeedBytes)}`);
+}
 
 section('headers');
 const publicHeaders = readFileSync(join(root, 'public/_headers'), 'utf8');
@@ -736,10 +848,30 @@ console.log(
       wasm: {
         packageBytes: wasmBytes.length,
         packageSha256: wasmSha256,
-        distAsset: distWasmFiles[0],
+        distAsset: distWasmAsset,
         distBytes: distWasmBytes.length,
         distSha256: distWasmSha256,
         match: true,
+        relate: {
+          package: `${relatePkg.name}@${relatePkg.version}`,
+          packageBytes: relateWasmBytes.length,
+          packageSha256: relateWasmSha256,
+          distAsset: relateDistAsset,
+          distBytes: relateDistBytes.length,
+          match: true,
+        },
+      },
+      farmbot: {
+        html: 'dist/farmbot/index.html',
+        firstPaintChunks: farmbotFirstPaintChunks,
+        lazyRelateChunk: relateLazyChunk,
+        i18n: { enKeys: farmbotEnKeys.length, jaKeys: farmbotJaKeys.length },
+        seed: {
+          servedPath: 'dist/farmbot/farmbot.seed.json',
+          bytes: servedSeedBytes.length,
+          sha256: farmbotSeedHex,
+          byteIdentical: true,
+        },
       },
       headers: {
         publicRules: headerBlocks.length,
