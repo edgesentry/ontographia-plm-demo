@@ -1,0 +1,314 @@
+# FarmBot Genesis v1.7 — standalone native ontology for this demo.
+#
+# This file is self-contained. It does not import, extend, wrap or copy any
+# other ontology, and it is not coupled to the unrelated product structure
+# demo that lives elsewhere in this repository.
+#
+# Scope: one pinned release of the FarmBot Genesis documentation set, as
+# normalised into the DuckDB extract built by farmbot/scripts/extract.mjs.
+#
+# The engineering BOM grouping (assembly chapters) and the manufacturing BOM
+# grouping (pre-assembly, kit, bag, carton) are views constructed by this
+# repository. "EBOM" and "MBOM" are our labels, not official FarmBot terms,
+# and this model does not claim to reproduce how FarmBot organises or builds
+# its product.
+#
+# The native format has no relationship properties, so per-link facts such as
+# quantities live on the Usage node instead of on the relationship.
+
+namespaces:
+  fb: http://example.org/farmbot-demo#
+
+classes:
+  - name: Item
+    description: >-
+      Abstract superclass for anything a usage line can point at: parts, and
+      the manufacturing containers built from them.
+  - name: Structure
+    description: >-
+      Abstract superclass for the things that own usage lines: assembly
+      chapters and manufacturing containers.
+  - name: Part
+    super_classes: [Item]
+    description: >-
+      A part page in the FarmBot BOM, one row of the `part` table.
+  - name: PartVariant
+    description: >-
+      One purchasable option of a part, such as a length, one row of the
+      `part_variant` table. Not the same thing as a product variant.
+  - name: BomCategory
+    description: >-
+      A BOM category page that parts are filed under, one row of the
+      `bom_category` table.
+  - name: ProductVariant
+    description: >-
+      One version of the machine as a whole. Two nodes exist, `standard`
+      (Genesis) and `xl` (Genesis XL); the extract stores this as the
+      `version` column.
+  - name: AssemblyChapter
+    super_classes: [Structure]
+    description: >-
+      One assembly instruction page, one row of the `assembly_page` table.
+      Used here as a constructed EBOM grouping, which is our label rather
+      than an official FarmBot term.
+  - name: ManufacturingContainer
+    super_classes: [Item, Structure]
+    description: >-
+      Abstract container in the constructed MBOM view: a pre-assembly, a
+      kit, a bag or the carton. MBOM is our label, not an official FarmBot
+      term.
+  - name: PreAssembly
+    super_classes: [ManufacturingContainer]
+    description: >-
+      A pre-assembly page, one row of the `preassembly_page` table. Some of
+      these pages have no machine-readable component list and therefore no
+      usage lines.
+  - name: Kit
+    super_classes: [ManufacturingContainer]
+    description: >-
+      A packing page that lists a kit, one row of the `packing_page` table,
+      excluding the main carton page.
+  - name: Bag
+    super_classes: [ManufacturingContainer]
+    description: >-
+      A bag inside a kit: a `packing_item` row with `item_kind = 'pack'`,
+      and the `Accessory bag BOM` section of a pre-assembly page.
+  - name: Carton
+    super_classes: [ManufacturingContainer]
+    description: >-
+      The main carton packing page, the `packing_page` row for
+      `main-carton.md`.
+  - name: Usage
+    description: >-
+      One resolved reference line, from `assembly_reference`,
+      `preassembly_reference` or `packing_item`. Carries the quantity and
+      the resolution result, because relationships have no properties.
+  - name: Correspondence
+    description: >-
+      Abstract superclass for nodes derived by comparing the extract with
+      itself, rather than read from a single source table.
+  - name: QuantityComparison
+    super_classes: [Correspondence]
+    description: >-
+      One packing-list quantity compared with the quantity declared on the
+      part page, for one product variant; a row of the
+      `quantity_comparison` table.
+  - name: QuantityDifference
+    super_classes: [QuantityComparison]
+    description: >-
+      A quantity comparison whose packing count differs from the part page
+      count. One node per row of the `quantity_difference` table.
+  - name: UnmatchedName
+    super_classes: [Correspondence]
+    description: >-
+      A display name that did not resolve to a part, one row of the
+      `unmatched_name` table.
+
+relationships:
+  - name: IN_CATEGORY
+    from_class: Part
+    to_class: BomCategory
+    direction: out
+  - name: HAS_PART_VARIANT
+    from_class: Part
+    to_class: PartVariant
+    direction: out
+  - name: HAS_USAGE
+    from_class: Structure
+    to_class: Usage
+    direction: out
+  - name: USES_ITEM
+    from_class: Usage
+    to_class: Item
+    direction: out
+  - name: APPLIES_TO
+    from_class: Usage
+    to_class: ProductVariant
+    direction: out
+  - name: COMPARES_PART
+    from_class: QuantityComparison
+    to_class: Part
+    direction: out
+  - name: COMPARED_IN
+    from_class: QuantityComparison
+    to_class: ManufacturingContainer
+    direction: out
+  - name: FOR_VARIANT
+    from_class: QuantityComparison
+    to_class: ProductVariant
+    direction: out
+  - name: SEEN_IN
+    from_class: UnmatchedName
+    to_class: Structure
+    direction: out
+  - name: CANDIDATE
+    from_class: UnmatchedName
+    to_class: Part
+    direction: out
+
+properties:
+  - name: name
+    owner_class: Part
+    datatype: string
+    required: true
+    unique: true
+  - name: slug
+    owner_class: Part
+    datatype: string
+  - name: category_slug
+    owner_class: Part
+    datatype: string
+  - name: quantity_standard
+    owner_class: Part
+    datatype: integer
+  - name: quantity_xl
+    owner_class: Part
+    datatype: integer
+  - name: has_variants
+    owner_class: Part
+    datatype: boolean
+  - name: market_price
+    owner_class: Part
+    datatype: string
+
+  - name: part_name
+    owner_class: PartVariant
+    datatype: string
+  - name: variant_index
+    owner_class: PartVariant
+    datatype: integer
+  - name: label
+    owner_class: PartVariant
+    datatype: string
+  - name: length
+    owner_class: PartVariant
+    datatype: string
+  - name: internal_part_name
+    owner_class: PartVariant
+    datatype: string
+  - name: quantity_standard
+    owner_class: PartVariant
+    datatype: integer
+  - name: quantity_xl
+    owner_class: PartVariant
+    datatype: integer
+
+  - name: slug
+    owner_class: BomCategory
+    datatype: string
+    required: true
+    unique: true
+  - name: title
+    owner_class: BomCategory
+    datatype: string
+  - name: path
+    owner_class: BomCategory
+    datatype: string
+  - name: part_count
+    owner_class: BomCategory
+    datatype: integer
+
+  - name: code
+    owner_class: ProductVariant
+    datatype: string
+    required: true
+    unique: true
+  - name: label
+    owner_class: ProductVariant
+    datatype: string
+
+  - name: path
+    owner_class: Structure
+    datatype: string
+    required: true
+    unique: true
+  - name: title
+    owner_class: Structure
+    datatype: string
+
+  - name: chapter
+    owner_class: AssemblyChapter
+    datatype: string
+  - name: reference_count
+    owner_class: AssemblyChapter
+    datatype: integer
+
+  - name: machine_readable
+    owner_class: PreAssembly
+    datatype: boolean
+  - name: machine_readable_reason
+    owner_class: PreAssembly
+    datatype: string
+  - name: pdf_count
+    owner_class: PreAssembly
+    datatype: integer
+
+  - name: quantity
+    owner_class: Usage
+    datatype: integer
+  - name: quantity_text
+    owner_class: Usage
+    datatype: string
+  - name: unit
+    owner_class: Usage
+    datatype: string
+  - name: section
+    owner_class: Usage
+    datatype: string
+  - name: source_kind
+    owner_class: Usage
+    datatype: string
+  - name: line_number
+    owner_class: Usage
+    datatype: integer
+  - name: display_name
+    owner_class: Usage
+    datatype: string
+  - name: match_method
+    owner_class: Usage
+    datatype: string
+  - name: sub_packing
+    owner_class: Usage
+    datatype: string
+
+  - name: packing_quantity
+    owner_class: QuantityComparison
+    datatype: integer
+  - name: part_quantity
+    owner_class: QuantityComparison
+    datatype: integer
+  - name: difference
+    owner_class: QuantityComparison
+    datatype: integer
+  - name: status
+    owner_class: QuantityComparison
+    datatype: string
+  - name: note
+    owner_class: QuantityComparison
+    datatype: string
+  - name: sections
+    owner_class: QuantityComparison
+    datatype: string
+
+  - name: packing_minus_part
+    owner_class: QuantityDifference
+    datatype: integer
+
+  - name: display_name
+    owner_class: UnmatchedName
+    datatype: string
+  - name: normalized_name
+    owner_class: UnmatchedName
+    datatype: string
+  - name: singular_name
+    owner_class: UnmatchedName
+    datatype: string
+  - name: reference_count
+    owner_class: UnmatchedName
+    datatype: integer
+  - name: source_kinds
+    owner_class: UnmatchedName
+    datatype: string
+  - name: status
+    owner_class: UnmatchedName
+    datatype: string

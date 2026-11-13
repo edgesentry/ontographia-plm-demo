@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "verify": "node scripts/verify.mjs",
-    "test:farmbot": "node --test farmbot/test/extract.test.mjs",
+    "test:farmbot": "node --test 'farmbot/test/*.test.mjs'",
     "smoke": "node scripts/smoke.mjs",
     "smoke:webgpu": "node scripts/smoke-webgpu.mjs",
     "eval:intents": "node scripts/eval-intents.mjs",
@@ -31,6 +31,7 @@
     "playwright": "^1.65.0",
     "typescript": "~5.6.3",
     "vite": "^8.3.7",
-    "wrangler": "^4.160.0"
+    "wrangler": "^4.160.0",
+    "yaml": "2.9.1"
   }
 }
