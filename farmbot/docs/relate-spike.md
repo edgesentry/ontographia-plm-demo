@@ -8,6 +8,19 @@ Everything below was measured by running `farmbot/scripts/spike-relate.mjs`
 against the DuckDB extract built by `farmbot/scripts/extract.mjs`. No number in
 this document is estimated.
 
+## This is the earlier unofficial probe seed, not the committed graph
+
+The probe builds its own seed inside `farmbot/scripts/spike-relate.mjs`. That
+seed is not the output of the official generator and is not the committed seed.
+Every node and edge count in this document (601 nodes, 1017 relationships)
+belongs to the probe seed only.
+
+The official generator `farmbot/scripts/graph.mjs` and the committed seed
+`farmbot/dist/farmbot.seed.json` hold **604 nodes and 1022 edges**, with digest
+`farmbot-graph-v1 sha256:db6503e0c17d024d610736b0996c98a2872b495936d4f84230747db603f36fb1`.
+Read those figures, not the probe figures, when reasoning about the shipped
+graph.
+
 ## Versions tested
 
 | Component | Version |
@@ -54,7 +67,10 @@ represented by adding every ancestor label to the concrete nodes:
 | QuantityDifference | `QuantityDifference`, `QuantityComparison`, `Correspondence` |
 | UnmatchedName | `UnmatchedName`, `Correspondence` |
 
-## Measured seed size
+## Measured seed size (unofficial probe seed)
+
+The table below describes the probe seed built inside the spike script, not the
+committed `farmbot/dist/farmbot.seed.json`.
 
 | Metric | Value |
 |---|---|
@@ -147,8 +163,12 @@ an envelope with `error: null`. Row counts are the envelope's `rows.length`.
 
 Q2 and Q3 return one row per matching usage line, so a chapter or structure
 appears once per reference to the part (for example, Q2 returns
-`cross-slide-and-z-axis` twice and `gantry` five times). These Intents do not
-project DISTINCT and the spike did not add it, so the duplication is visible.
+`cross-slide-and-z-axis` twice and `gantry` five times). These probe Intents do
+not project DISTINCT and the spike did not add it, so the duplication is visible
+and the counts above are unchanged. The shipped Intents under `farmbot/intents/`
+answer the same questions with unique chapters and structures through a
+documented post-compile `DISTINCT` step kept in the test; see
+`farmbot/intents/README.md`.
 
 ### Compiled Cypher
 
