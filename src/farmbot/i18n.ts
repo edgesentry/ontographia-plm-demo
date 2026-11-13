@@ -47,7 +47,6 @@ const en = {
   distinctNote:
     'This statement received a post-compile RETURN DISTINCT step because Ontographia 0.1.9 cannot express DISTINCT. The compiler output itself had no DISTINCT; Q1, Q4 and Q5 are not modified.',
   quantityNote: 'Quantity differences are reported, not corrected, and not explained.',
-  errorHeading: 'Run failed',
   compileError: 'Ontographia could not compile the Intent. Nothing was executed.',
   seedFetchError: 'The committed seed could not be fetched. Nothing was loaded into Relate.',
   seedDigestError:
@@ -117,7 +116,6 @@ const ja: Record<keyof typeof en, string> = {
   distinctNote:
     'このステートメントには、Ontographia 0.1.9 が DISTINCT を表現できないため、コンパイル後の RETURN DISTINCT ステップを適用しています。コンパイラの出力自体に DISTINCT はなく、Q1・Q4・Q5 は変更していません。',
   quantityNote: '数量差は報告するだけで、訂正も説明も行いません。',
-  errorHeading: '実行に失敗しました',
   compileError: 'Ontographia が Intent をコンパイルできませんでした。実行は行っていません。',
   seedFetchError:
     'コミット済みシードを取得できませんでした。Relate には何も読み込んでいません。',

@@ -8,6 +8,7 @@ import { farmbotOntology } from './data';
 import { parseRelationshipEndpoints } from './ontology-relationships.mjs';
 import { buildSeedStatements, loadSeed } from './seed-load.mjs';
 import { fetchVerifiedSeed } from './seed';
+import { freeRelateDb, rethrowSeedLoadFailure } from './session-cleanup.mjs';
 import type { RelateSession } from './types';
 
 export type SessionStep = 'seed' | 'wasm' | 'seeding';
@@ -42,9 +43,12 @@ export async function openRelateSession(
   try {
     ({ statements: statementCount } = loadSeed(db, statements));
   } catch (loadError) {
-    db.free();
-    if (loader.isRelateWasmTrap(loadError)) throw new RelateTrapError(loadError);
-    throw loadError;
+    rethrowSeedLoadFailure(
+      db,
+      loadError,
+      (error) => loader.isRelateWasmTrap(error),
+      (cause) => new RelateTrapError(cause),
+    );
   }
 
   return {
@@ -58,7 +62,7 @@ export async function openRelateSession(
       return loader.isRelateWasmTrap(error);
     },
     close() {
-      db.free();
+      freeRelateDb(db);
     },
   };
 }

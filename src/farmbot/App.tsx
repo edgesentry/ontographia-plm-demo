@@ -12,6 +12,7 @@ import { planQuestion } from './plan.mjs';
 import { formatSeedDigest, SEED_DIGEST } from './seed-digest.mjs';
 import { SeedFetchError, SeedRejectedError } from './seed';
 import { openRelateSession, RelateTrapError, type SessionStep } from './session';
+import { closeTrappedSession } from './session-cleanup.mjs';
 import { loadOntographia, type Ontographia } from '../lib/ontographia';
 import type {
   Intent,
@@ -217,12 +218,13 @@ export function App() {
   };
 
   const trapSession = (session: RelateSession, trapError: unknown) => {
-    session.close();
-    sessionRef.current = null;
-    sessionPromise.current = null;
-    trappedRef.current = true;
-    setRelate({ status: 'trapped' });
-    setError({ kind: 'wasm-trap', detail: detailText(trapError) });
+    closeTrappedSession(session, trapError, (trap) => {
+      sessionRef.current = null;
+      sessionPromise.current = null;
+      trappedRef.current = true;
+      setRelate({ status: 'trapped' });
+      setError(trap);
+    });
   };
 
   const run = async () => {

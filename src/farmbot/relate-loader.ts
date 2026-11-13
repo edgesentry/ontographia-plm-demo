@@ -9,20 +9,22 @@
 import initRelate, { RelateDb } from '@relate/relate-wasm';
 import { isWasmTrap } from '@relate/relate-wasm/trap.js';
 import relateWasmUrl from '@relate/relate-wasm/relate_bg.wasm?url';
+import { createInitCache } from './init-cache.mjs';
 import type { RelateEnvelope } from './types';
 
-let initPromise: Promise<void> | null = null;
+const initRelateOnce = createInitCache(() =>
+  initRelate({ module_or_path: relateWasmUrl }),
+);
 
 /**
  * Initialise the WASM module with the same-origin asset URL emitted by Vite.
  * The URL is passed explicitly so no call can fall back to a bare `init()` that
  * would fetch `relate_bg.wasm` from a non-same-origin path.
+ *
+ * A failed attempt is not cached, so a later Run retries the initialisation.
  */
 export async function initRelateWasm(): Promise<void> {
-  if (!initPromise) {
-    initPromise = initRelate({ module_or_path: relateWasmUrl }).then(() => undefined);
-  }
-  return initPromise;
+  return initRelateOnce();
 }
 
 /** A writable `:memory:` database. No OPFS, no persisted store. */
