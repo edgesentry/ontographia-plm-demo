@@ -1,9 +1,10 @@
 # DuckDB extract distribution
 
 The FarmBot tree builds one DuckDB file from the pinned Genesis submodule. The
-binary is a build output and is not committed. The expected content hash is
-committed, and the artifact is distributed in two ways: a short-lived CI
-artifact and a lasting object in Cloudflare R2.
+binary is a build output and is not committed. The expected content digest is
+committed, and the file is distributed in two ways: a short-lived CI artifact
+and a GitHub Release. The same release carries the persistent Relate directory
+store (`farmbot/docs/relate-store.md`).
 
 The constructed EBOM and MBOM views, and the derived correspondence tables in
 the extract, are ours. They are not official FarmBot labels.
@@ -36,6 +37,14 @@ After a successful build:
 `npm run test:farmbot` rebuilds the database, computes the canonical digest,
 and compares it with the tracked sidecar. The test is scoped to the FarmBot
 tree and is not part of `npm run verify` or `npm run smoke`.
+
+To build the release files (DuckDB, store archive, manifest and
+`SHA256SUMS`) and to check a downloaded copy:
+
+```sh
+npm run release:assets -- --out release-assets
+npm run release:verify -- release-assets
+```
 
 ## Reproducibility
 
@@ -76,46 +85,55 @@ node --input-type=module -e "import { canonicalDigest } from './farmbot/scripts/
 Name matching rules and the meaning of `not_comparable` are documented in
 `farmbot/docs/name-normalization.md`.
 
-## Short-term distribution: CI artifact
+## Short-term distribution: CI artifacts
 
 The `farmbot` job in `.github/workflows/ci.yml` checks out the submodule,
 installs dependencies, runs `npm run test:farmbot`, and uploads both files as
 the `farmbot-duckdb` artifact with 90 days of retention. The job uses
 SHA-pinned checkout, setup-node, and upload-artifact actions.
 
-The artifact is suitable for review and short-lived use. It expires, so it is
-not the lasting distribution channel.
+The `farmbot-release-assets` job also checks out the submodule on Node 22 and
+runs `npm run release:assets -- --out release-assets` followed by
+`npm run release:verify -- release-assets`. It uploads the four release files
+(the DuckDB file, the store archive, the release manifest and `SHA256SUMS`) as
+the `farmbot-release-assets` artifact with 90 days of retention. Both artifacts
+expire, so neither is the lasting distribution channel.
 
-## Lasting distribution: Cloudflare R2
+## Lasting distribution: GitHub Releases
 
-The canonical object keys are:
+The canonical release tag is `farmbot-data-v1`. It carries four assets:
 
-```text
-farmbot/v1.7/44e0fa24d4a538dfa1255a4e89308ccabf3abaeb/farmbot.duckdb
-farmbot/v1.7/44e0fa24d4a538dfa1255a4e89308ccabf3abaeb/farmbot.duckdb.sha256
-```
+| Asset | Contents |
+| --- | --- |
+| `farmbot.duckdb` | The DuckDB extract. |
+| `farmbot-relate-store.tar.gz` | The persistent Relate directory store, JSON snapshot codec. |
+| `farmbot.release.json` | The digest manifest: seed, DuckDB canonical and store logical digests, counts, and the Genesis pin. |
+| `SHA256SUMS` | `sha256sum`-format hashes of the other three files. |
 
-Upload is a maintainer step. It is not performed by CI, by the extract script,
-or by this repository's application code. The bucket and its access policy are
-maintained outside this task; no Worker configuration or `wrangler.jsonc`
-change is required to publish the objects.
-
-One upload procedure with an S3-compatible client:
+Publishing is a maintainer step. CI builds and uploads the
+`farmbot-release-assets` artifact but never creates a release. The maintainer
+downloads that artifact, verifies it locally, and attaches the files to the
+release:
 
 ```sh
-export R2_ENDPOINT="https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
-export R2_BUCKET="<BUCKET_NAME>"
-# Provide credentials through the client's normal environment or profile.
-aws s3 cp farmbot/dist/farmbot.duckdb \
-  "s3://${R2_BUCKET}/farmbot/v1.7/44e0fa24d4a538dfa1255a4e89308ccabf3abaeb/farmbot.duckdb" \
-  --endpoint-url "${R2_ENDPOINT}"
-aws s3 cp farmbot/dist/farmbot.duckdb.sha256 \
-  "s3://${R2_BUCKET}/farmbot/v1.7/44e0fa24d4a538dfa1255a4e89308ccabf3abaeb/farmbot.duckdb.sha256" \
-  --endpoint-url "${R2_ENDPOINT}"
+gh run download <run-id> -n farmbot-release-assets -D release-assets
+npm run release:verify -- release-assets
+gh release create farmbot-data-v1 release-assets/* \
+  --target <merge-commit-sha> --title "FarmBot data v1" --notes "..."
 ```
 
-Before uploading, run `npm run test:farmbot` and confirm that the tracked
-`.sha256` file matches the canonical digest of the local database. After
-uploading, download both objects and verify the digest again. Credentials
-and endpoints stay in the maintainer's environment; they are never committed
-to this repository.
+To check a downloaded copy of the assets:
+
+```sh
+npm run release:verify -- <dir>
+```
+
+It verifies every `SHA256SUMS` line against the file bytes, checks that the
+bundled `farmbot.release.json` equals the committed manifest, extracts the
+store archive into a temporary directory, recomputes the store's logical
+digest and counts, and computes the DuckDB canonical digest. It prints one line
+per check and stops at the first failure.
+
+Cloudflare R2 is not used for these files. The release assets are the only
+lasting channel.
+
