@@ -19,6 +19,7 @@ const EXTRACT = resolve(ROOT, 'farmbot/scripts/extract.mjs');
 const ONTOLOGY_PATH = resolve(ROOT, 'farmbot/ontology/farmbot.native.yaml');
 const INTENTS_DIR = resolve(ROOT, 'farmbot/intents');
 const ORACLE_DIR = resolve(ROOT, 'farmbot/oracle');
+const GOLD_RESULTS = resolve(ROOT, 'farmbot/oracle/default-results.gold.json');
 const COMMITTED_SEED = resolve(ROOT, 'farmbot/dist/farmbot.seed.json');
 const COMMITTED_SEED_DIGEST = `${COMMITTED_SEED}.sha256`;
 const COMMITTED_ALLOWED_VALUES = resolve(
@@ -237,7 +238,13 @@ async function runQuestion(file) {
     multiset(expected),
     `${file}: Relate rows differ from the SQL oracle`,
   );
-  return { intent, query, executed, rows: result.rows };
+  return {
+    intent,
+    query,
+    executed,
+    rows: result.rows,
+    columns: result.columns ?? [],
+  };
 }
 
 test('the committed seed is the official graph with its pinned digest', () => {
@@ -424,4 +431,29 @@ test('Q5 compares every unmatched reference with the oracle', async () => {
   const { rows } = await runQuestion('q5-unmatched-references.json');
   assert.equal(rows.length, 17);
   assert.equal(new Set(rows.map((row) => row.display_name)).size, 13);
+});
+
+test('the committed default-result gold matches Relate and the SQL oracle', async () => {
+  const gold = JSON.parse(readFileSync(GOLD_RESULTS, 'utf8'));
+  assert.equal(gold.format, 'farmbot-default-results-v1');
+  assert.equal(gold.seedDigest, SEED_DIGEST);
+  assert.equal(gold.seedBytes, seedBytes.length);
+  assert.deepEqual(
+    gold.questions.map((entry) => entry.id),
+    ['q1', 'q2', 'q3', 'q4', 'q5'],
+  );
+  for (const [index, file] of QUESTION_FILES.entries()) {
+    const entry = gold.questions[index];
+    assert.equal(entry.intentFile, file);
+    // runQuestion re-derives the rows from Relate and asserts they equal the
+    // SQL oracle, so this comparison also pins the gold to the oracle.
+    const { rows, columns } = await runQuestion(file);
+    assert.equal(entry.rowCount, rows.length, `${file}: gold row count`);
+    assert.deepEqual(entry.columns, columns, `${file}: gold columns`);
+    assert.deepEqual(
+      entry.rows.map((row) => JSON.stringify(row)),
+      multiset(rows),
+      `${file}: gold rows must match Relate and the SQL oracle`,
+    );
+  }
 });

@@ -54,6 +54,12 @@ interface RunResult {
   digest: string;
 }
 
+/** Engine timings read by the browser smoke; milliseconds from `performance`. */
+interface ScreenTimings {
+  seedLoadMs: number | null;
+  queries: Partial<Record<QuestionId, number>>;
+}
+
 const QUESTION_LABEL_KEYS: Record<QuestionId, MessageKey> = {
   q1: 'q1Label',
   q2: 'q2Label',
@@ -122,11 +128,32 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const [error, setError] = useState<ScreenError | null>(null);
+  const [timings, setTimings] = useState<ScreenTimings>({
+    seedLoadMs: null,
+    queries: {},
+  });
 
   const sessionRef = useRef<RelateSession | null>(null);
   const sessionPromise = useRef<Promise<RelateSession> | null>(null);
   const trappedRef = useRef(false);
   const runToken = useRef(0);
+  const timingMarkId = useRef(0);
+
+  // Marks around the engine work only: seed fetch/digest/load for the session,
+  // and `session.execute` for a query. React render time is outside both.
+  const startTiming = (prefix: string): string => {
+    timingMarkId.current += 1;
+    const markName = `${prefix}:start:${timingMarkId.current}`;
+    performance.mark(markName);
+    return markName;
+  };
+
+  const finishTiming = (prefix: string, startMark: string): number => {
+    timingMarkId.current += 1;
+    const endMark = `${prefix}:end:${timingMarkId.current}`;
+    performance.mark(endMark);
+    return performance.measure(prefix, startMark, endMark).duration;
+  };
 
   const t = (key: MessageKey) => messages[lang][key];
 
@@ -195,10 +222,13 @@ export function App() {
     }
     if (!sessionPromise.current) {
       setRelate({ status: 'loading', step: 'seed' });
+      const seedLoadMark = startTiming('farmbot:seed-load');
       sessionPromise.current = openRelateSession((step) =>
         setRelate({ status: 'loading', step }),
       )
         .then((session) => {
+          const seedLoadMs = finishTiming('farmbot:seed-load', seedLoadMark);
+          setTimings((current) => ({ ...current, seedLoadMs }));
           sessionRef.current = session;
           setRelate({
             status: 'ready',
@@ -279,9 +309,12 @@ export function App() {
       if (runToken.current !== token) return;
 
       let envelope: RelateEnvelope;
+      const queryPrefix = `farmbot:query:${questionToRun.id}`;
+      const queryMark = startTiming(queryPrefix);
       try {
         envelope = session.execute(plan.executed, plan.params);
       } catch (executeError) {
+        finishTiming(queryPrefix, queryMark);
         if (session.isTrap(executeError)) {
           trapSession(session, executeError);
         } else {
@@ -289,6 +322,11 @@ export function App() {
         }
         return;
       }
+      const queryMs = finishTiming(queryPrefix, queryMark);
+      setTimings((current) => ({
+        ...current,
+        queries: { ...current.queries, [questionToRun.id]: queryMs },
+      }));
 
       if (envelope.error) {
         setError({ kind: 'relate-query', detail: envelope.error });
@@ -338,6 +376,9 @@ export function App() {
 
   return (
     <main>
+      <div hidden data-testid="timings">
+        {JSON.stringify(timings)}
+      </div>
       <header className="app-header">
         <div>
           <h1>{t('title')}</h1>
@@ -387,6 +428,7 @@ export function App() {
               key={candidate.id}
               type="button"
               className={`chip${candidate.id === selectedId ? ' is-selected' : ''}`}
+              data-testid={`question-${candidate.id}`}
               aria-pressed={candidate.id === selectedId}
               onClick={() => selectQuestion(candidate.id)}
             >
@@ -527,7 +569,7 @@ export function App() {
         <dl className="farmbot-meta">
           <dt>{t('digestLabel')}</dt>
           <dd>
-            <code>{SEED_DIGEST}</code>
+            <code data-testid="expected-digest">{SEED_DIGEST}</code>
           </dd>
           <dt>{t('sourcePinLabel')}</dt>
           <dd>
@@ -537,10 +579,10 @@ export function App() {
             <>
               <dt>{t('receivedDigestLabel')}</dt>
               <dd>
-                <code>{relate.digest}</code>
+                <code data-testid="verified-digest">{relate.digest}</code>
               </dd>
               <dt>{t('seedBytesLabel')}</dt>
-              <dd>{relate.byteLength}</dd>
+              <dd data-testid="seed-bytes">{relate.byteLength}</dd>
               <dt>{t('statementsLabel')}</dt>
               <dd>{relate.statements}</dd>
             </>

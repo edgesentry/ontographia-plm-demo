@@ -74,6 +74,90 @@ both entries and checks that `dist/farmbot/index.html` exists, that the served s
 to the committed seed, that both WASM assets match their installed packages by SHA-256, and that the
 FarmBot entry's first-paint chunks contain no Relate engine code.
 
+### FarmBot browser smoke (`/farmbot/`)
+
+```bash
+npx -y node@22 scripts/verify.mjs   # or a Node 22 `npm run build`; produces dist/
+npm run smoke:farmbot
+```
+
+`npm run smoke:farmbot` drives the built `/farmbot/` entry in headless Playwright
+Chromium (with a system Chrome fallback). It does not build; its local default
+requires `dist/farmbot/index.html` and `dist/farmbot/farmbot.seed.json`. When
+`SMOKE_BASE_URL` is unset it serves `dist/` itself on `SMOKE_PORT` (default
+`4175`) and stops the server in a `finally` block. `vite preview` does not apply
+`_headers` as HTTP headers, so the script's own server applies the `_headers`
+rules from `dist/` to the responses it serves: the production CSP on `/*`,
+`Content-Type: application/wasm` on `/assets/*.wasm`, and the immutable cache
+rule on `/assets/*`. In that mode the smoke asserts that the document response
+really carries the CSP, so "zero CSP violations" is not a vacuous result. For a
+deployed origin, set `SMOKE_BASE_URL`; the script then uses that origin as the
+site root and adds no headers of its own:
+
+```bash
+SMOKE_BASE_URL=https://<origin>/ npx -y node@22 scripts/smoke-farmbot.mjs
+```
+
+The run fails unless all of these hold: the five question chips are visible and
+Ontographia is ready before the first Run; first paint requests neither the
+Relate WASM asset nor the lazy Relate chunk; the page shows the committed seed
+digest and a same-origin fetch of `/farmbot/farmbot.seed.json` hashes to it;
+each of the five questions runs with its committed default selector value and
+matches the committed gold file `farmbot/oracle/default-results.gold.json` row
+for row (12 / 2 / 7 / 24 / 17 rows); Relate WASM is requested same-origin on the
+first successful Run; a one-byte-tampered seed is rejected with the
+expected/actual digest, loads no rows, and never requests Relate; every context
+reports zero CSP violations and zero non-same-origin requests; and the
+happy-path `pageerror` list is empty.
+
+The gold file is generated, never hand-edited:
+
+```bash
+npx -y node@22 farmbot/scripts/gold-results.mjs
+```
+
+`npm run test:farmbot` includes a test that the committed gold still equals both
+Relate and the SQL oracle, so the fixture cannot drift.
+
+Timings come from `performance` marks around the engine work only: the whole
+`openRelateSession` (seed fetch, digest check, Relate load, in-memory seed load)
+and each `session.execute` call, excluding Ontographia compilation and React
+render. The proposed budgets are 2000 ms for the seed load and 100 ms per query.
+They are printed but not enforced; set `SMOKE_FARMBOT_ENFORCE_BUDGET=1` to fail a
+run that misses one. The `farmbot-smoke` CI job runs the build and the smoke on
+Node 22 without that variable.
+
+Measured on 2026-11-13 on macOS 27.2.1 arm64, Node 22.23.5, Playwright 1.65.0
+with its bundled Chromium 158.0.8127.18, from a local `npm run smoke:farmbot`
+run against a local Node 22 production build. These are local numbers; no
+CI-runner timings were observed.
+
+| Artifact | raw bytes | `gzip -9 -n` bytes |
+| --- | ---: | ---: |
+| `dist/assets/ontographia_wasm-BOJRSUvY.wasm` | 512627 | 173885 |
+| `dist/assets/relate_bg-9Q1Zsp67.wasm` | 6932319 | 2424791 |
+| `dist/assets/relate-loader-C129q4jF.js` | 12367 | 4579 |
+| `dist/assets/farmbot-DcVRHk05.js` | 38730 | 11896 |
+| `dist/farmbot/farmbot.seed.json` | 364867 | 18135 |
+
+Each row came from these two commands (substituting the file):
+
+```bash
+wc -c < dist/assets/ontographia_wasm-BOJRSUvY.wasm
+gzip -9 -n -c dist/assets/ontographia_wasm-BOJRSUvY.wasm | wc -c
+```
+
+Smoke timings from that run:
+
+| Measurement | ms | Proposed budget |
+| --- | ---: | ---: |
+| Seed fetch + digest + Relate load | 585.9 | 2000 |
+| Q1 `session.execute` | 4.2 | 100 |
+| Q2 `session.execute` | 3.8 | 100 |
+| Q3 `session.execute` | 3.2 | 100 |
+| Q4 `session.execute` | 1.5 | 100 |
+| Q5 `session.execute` | 0.8 | 100 |
+
 ### Browser smoke
 
 ```bash
