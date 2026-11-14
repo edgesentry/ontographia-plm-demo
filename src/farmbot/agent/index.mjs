@@ -19,7 +19,7 @@ import {
   REFERENCE_INTENTS,
 } from './checks.mjs';
 import { compileCheck } from './compile.mjs';
-import { assignFindingIds } from './ids.mjs';
+import { assignFindingIds, findingSubjectKey } from './ids.mjs';
 import { evaluateSeverity } from './severity.mjs';
 import {
   packedWithoutProcessCauses,
@@ -83,6 +83,44 @@ function sortEvidence(evidence) {
     (left, right) =>
       compareText(left.role, right.role) || compareText(left.nodeId, right.nodeId),
   );
+}
+
+/**
+ * Identity of one evidence row: role, seed node id, source file and line.
+ * Within one finding those four fields describe the same citation of the same
+ * node, so repeated rows are collapsed before sorting.
+ *
+ * @param {{ role: string, nodeId: string, sourceFile: string | null, line: number | null }} row
+ * @returns {string}
+ */
+function evidenceIdentity(row) {
+  return JSON.stringify([row.role, row.nodeId, row.sourceFile, row.line]);
+}
+
+/**
+ * Drop repeated evidence rows, keeping the first occurrence.
+ *
+ * @param {Array<{ role: string, nodeId: string, sourceFile: string | null, line: number | null }>} evidence
+ * @returns {Array<{ role: string, nodeId: string, sourceFile: string | null, line: number | null }>}
+ */
+function uniqueEvidence(evidence) {
+  const seen = new Set();
+  return evidence.filter((row) => {
+    const identity = evidenceIdentity(row);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
+/**
+ * Deduplicate and sort the evidence rows of one finding.
+ *
+ * @param {Array<{ role: string, nodeId: string, sourceFile: string | null, line: number | null }>} evidence
+ * @returns {Array<{ role: string, nodeId: string, sourceFile: string | null, line: number | null }>}
+ */
+function finalizeEvidence(evidence) {
+  return sortEvidence(uniqueEvidence(evidence));
 }
 
 /**
@@ -257,7 +295,7 @@ export function collectFindings(options) {
         pdfCount: page.pdf_count ?? 0,
       }),
       countermeasures: unreadablePageCountermeasures({ path: page.path ?? '' }),
-      evidence: sortEvidence([
+      evidence: finalizeEvidence([
         {
           nodeId: page.id,
           role: 'pre-assembly-page',
@@ -366,7 +404,7 @@ export function collectFindings(options) {
         quantityDifference,
       }),
       countermeasures: quantityCountermeasures({ partName: part.name, variantCode }),
-      evidence: sortEvidence(evidence),
+      evidence: finalizeEvidence(evidence),
       queries: queryFor(ruleOf('R1')),
       rule: 'R1',
       severityFactors: {
@@ -437,7 +475,7 @@ export function collectFindings(options) {
         structureCount: structures.size,
       }),
       countermeasures: unresolvedReferenceCountermeasures({ displayName }),
-      evidence: sortEvidence(evidence),
+      evidence: finalizeEvidence(evidence),
       queries: queryFor(ruleOf('R2')),
       rule: 'R2',
       severityFactors: {
@@ -465,7 +503,7 @@ export function collectFindings(options) {
         r5Paths,
       }),
       countermeasures: unreferencedPartCountermeasures({ partName: part.name }),
-      evidence: sortEvidence([
+      evidence: finalizeEvidence([
         {
           nodeId: part.id,
           role: 'part',
@@ -491,9 +529,21 @@ export function collectFindings(options) {
     });
   }
 
-  // R4: parts packed but absent from process documentation.
-  for (const part of parts) {
-    if (!packingStructuresByPart.has(part.name)) continue;
+  // R4: parts packed but absent from process documentation. Every packing
+  // reference row carries its whole Part node, so the rule is derived from the
+  // kit and carton rows and does not scan the full part list.
+  /** @type {Map<string, Record<string, unknown>>} */
+  const packedPartsByName = new Map();
+  for (const reference of references) {
+    if (!PACKING_INTENTS.includes(REFERENCE_INTENTS[reference.kind])) continue;
+    const partName = reference.part.name;
+    if (typeof partName !== 'string') continue;
+    packedPartsByName.set(partName, reference.part);
+  }
+  const packedParts = [...packedPartsByName.values()].sort((left, right) =>
+    compareText(/** @type {string} */ (left.id), /** @type {string} */ (right.id)),
+  );
+  for (const part of packedParts) {
     if (processStructuresByPart.has(part.name)) continue;
     const packingLines = (referencesByPart.get(part.name) ?? []).filter(
       (reference) => reference.kind === 'kit' || reference.kind === 'carton',
@@ -536,7 +586,7 @@ export function collectFindings(options) {
     findings.push({
       causes: packedWithoutProcessCauses({ files, partName: part.name, r5Paths }),
       countermeasures: packedWithoutProcessCountermeasures({ partName: part.name }),
-      evidence: sortEvidence(evidence),
+      evidence: finalizeEvidence(evidence),
       queries: queryFor(ruleOf('R4')),
       rule: 'R4',
       severityFactors: {
@@ -550,9 +600,9 @@ export function collectFindings(options) {
     });
   }
 
-  // Overlap: how many other findings share the subject node. A part compared
-  // for both product variants has two findings on the same part, so both carry
-  // overlap 1; R2 subjects are display names and have no node.
+  // Overlap: the number of other findings with the same subject node id. A
+  // part compared for both product variants has two findings on the same part,
+  // so both carry overlap 1; R2 subjects are display names and have no node.
   /** @type {Map<string, number[]>} */
   const owners = new Map();
   for (const [index, finding] of findings.entries()) {
@@ -581,12 +631,19 @@ export function collectFindings(options) {
       key: /** @type {{ key: string }} */ (finding.subject).key,
     })),
   );
-  for (const [index, finding] of findings.entries()) {
+  for (const finding of findings) {
     const factors = /** @type {import('./severity.mjs').SeverityFactors} */ (
       finding.severityFactors
     );
     const severity = evaluateSeverity(/** @type {string} */ (finding.rule), factors);
-    finding.id = ids[index];
+    const id = ids.get(
+      findingSubjectKey(
+        /** @type {string} */ (finding.rule),
+        /** @type {{ key: string }} */ (finding.subject).key,
+      ),
+    );
+    if (typeof id !== 'string') throw new Error(`no finding id for ${finding.rule}`);
+    finding.id = id;
     finding.severity = severity.level;
     finding.severityScore = severity.score;
   }

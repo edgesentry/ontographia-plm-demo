@@ -208,6 +208,34 @@ test('every evidence row resolves to a committed seed node', () => {
   }
 });
 
+test('no finding repeats an evidence row', () => {
+  for (const finding of findings.findings) {
+    const seen = new Set();
+    for (const row of finding.evidence) {
+      const identity = JSON.stringify([row.role, row.nodeId, row.sourceFile, row.line]);
+      assert.equal(
+        seen.has(identity),
+        false,
+        `${finding.id} repeats ${row.role} ${row.nodeId} from ${row.sourceFile}:${row.line}`,
+      );
+      seen.add(identity);
+    }
+  }
+
+  const woodScrews = findingsByRule('R2').filter(
+    (finding) => finding.subject.key.toLowerCase() === 'wood screws',
+  );
+  assert.equal(woodScrews.length, 2, 'the seed must have both Wood Screws subjects');
+  for (const finding of woodScrews) {
+    const structureNodes = evidenceOf(finding, 'structure').map((row) => row.nodeId);
+    assert.equal(
+      new Set(structureNodes).size,
+      structureNodes.length,
+      `${finding.id} cites a structure node more than once`,
+    );
+  }
+});
+
 test('R1 findings equal the SQL oracle', async () => {
   const oracle = await oracleRows('r1-packing-quantity.sql');
   const actual = findingsByRule('R1').map((finding) => {
@@ -354,5 +382,18 @@ test('the check Intent files are the only inputs to the recorded queries', () =>
         assert.deepEqual(query.params, compiled.params);
       }
     }
+
+    const recorded = [
+      ...new Set(
+        findingsByRule(rule.id).flatMap((finding) =>
+          finding.queries.map((query) => query.intent),
+        ),
+      ),
+    ].sort();
+    assert.deepEqual(
+      recorded,
+      rule.intents.map((file) => `farmbot/checks/${file}`).sort(),
+      `${rule.id} records queries that differ from its Intents`,
+    );
   }
 });

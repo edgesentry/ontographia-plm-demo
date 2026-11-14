@@ -5,7 +5,7 @@
 //   P  processes reached          distinct structure nodes in the evidence
 //   V  product variants reached   distinct product variant codes reached
 //   Q  quantity difference        absolute packing-minus-part difference
-//   O  overlap                    other findings sharing an evidence node id
+//   O  overlap                    other findings with the same subject node id
 //
 // score = 2P + V + min(Q, 10) + 2O
 //

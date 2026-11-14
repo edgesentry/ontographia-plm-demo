@@ -48,9 +48,13 @@ pre-assembly page, so bags are a separate reference source.
 ### R4: a part packed but not referenced by a process
 
 The packing references are the kit and carton Intents; the process references
-are the assembly chapter, pre-assembly and bag Intents. A part is reported when
-it appears in the first set and in neither of the other two. On the current seed
-this is 11 parts.
+are the assembly chapter, pre-assembly and bag Intents. Every packing reference
+row carries its whole `Part` node, so R4 is derived from those rows; only R3
+reads the full part list (`r3-parts.json`). A part is reported when it appears in
+the packing references and in none of the process references. On the current
+seed this is 11 parts. A part referenced only by pre-assembly pages is not
+reported by R4; on the current seed `M3 Locknut` is referenced by four
+pre-assembly pages.
 
 ### R5: a pre-assembly page with no machine-readable parts table
 
@@ -76,7 +80,7 @@ the rule module (upstream issues `edgesentry/ontographia#166` and
 | `r1-for-variant.json` | `QuantityDifference` | `FOR_VARIANT` → `ProductVariant` | R1 |
 | `r2-assembly-unmatched.json` | `AssemblyChapter` | `HAS_USAGE` → `Usage` | R2 |
 | `r2-manufacturing-unmatched.json` | `ManufacturingContainer` | `HAS_USAGE` → `Usage` | R2 |
-| `r3-parts.json` | `Part` | — | R3, R4 |
+| `r3-parts.json` | `Part` | — | R3 |
 | `refs-assembly.json` | `AssemblyChapter` | `HAS_USAGE` → `Usage` → `USES_ITEM` → `Part` | R3, R4 |
 | `refs-preassembly.json` | `PreAssembly` | `HAS_USAGE` → `Usage` → `USES_ITEM` → `Part` | R3, R4 |
 | `refs-bag.json` | `Bag` | `HAS_USAGE` → `Usage` → `USES_ITEM` → `Part` | R3, R4 |
@@ -141,6 +145,11 @@ digits of an FNV-1a hash of the full subject key. Ids match
 `^[A-Za-z0-9-]+$`, are unique within the document and are intended for
 `#finding=<id>` deep links.
 
+The id of a subject depends only on the set of subjects, not on the order in
+which they are passed: subjects are sorted by rule and key before any collision
+is resolved, and the ids are returned keyed by rule and subject key. A repeated
+rule-and-key pair is rejected rather than given two ids.
+
 ## Evidence rows
 
 Each finding has at least one evidence row:
@@ -155,6 +164,11 @@ Each finding has at least one evidence row:
 
 Evidence roles are `quantity-difference`, `part`, `packing-line`,
 `packing-structure`, `structure`, `reference` and `pre-assembly-page`.
+
+Rows within one finding are unique by role, node id, source file and line: a
+repeated row is the same citation of the same node and is dropped before the
+rows are sorted. A structure node referenced on several lines of one page is
+therefore cited once per finding.
 
 Line numbers are available only on assembly and pre-assembly reference lines:
 the `Usage` node copies `line_number` from `assembly_reference` or
@@ -179,7 +193,8 @@ structure nodes in the finding), `productVariantsReached` (R1: distinct product
 variant codes among the part's quantity differences; R3 and R4: the number of
 product versions for which the part declares a quantity; other rules: 0),
 `quantityDifference` (absolute packing-minus-part difference) and `overlap`
-(other findings about the same subject node). The severity score is
+(the number of other findings with the same subject node id). The severity
+score is
 
 ```
 score = 2 * processesReached + productVariantsReached
@@ -193,9 +208,9 @@ without any action on the part. The score and its factors are written into the
 finding. On the current seed R1 has 11 action and 1 review, R2 has 2 review and
 11 info, and R3, R4 and R5 are all info.
 
-Overlap counts other findings whose subject node is the same. R1 findings for
+Overlap counts the other findings with the same subject node id. R1 findings for
 the same part under `standard` and `xl` therefore both carry overlap 1; an R2
-subject is a display name with no node, so its overlap is 0.
+subject is a display name with no node id, so its overlap is 0.
 
 ## Causes and countermeasures
 

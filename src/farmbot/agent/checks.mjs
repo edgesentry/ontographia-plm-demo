@@ -57,7 +57,6 @@ export const CHECKS = Object.freeze([
     direction: 'packing-to-process',
     title: 'A part is packed but not referenced by an assembly chapter or pre-assembly',
     intents: Object.freeze([
-      'r3-parts.json',
       'refs-assembly.json',
       'refs-preassembly.json',
       'refs-bag.json',

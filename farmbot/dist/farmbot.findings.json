@@ -1987,16 +1987,6 @@
           "nodeId": "container:v1.7/manufacturing/packing/hardware-kit.md",
           "role": "structure",
           "sourceFile": "v1.7/manufacturing/packing/hardware-kit.md"
-        },
-        {
-          "facts": {
-            "structureKind": "manufacturing",
-            "title": "Hardware Kit"
-          },
-          "line": null,
-          "nodeId": "container:v1.7/manufacturing/packing/hardware-kit.md",
-          "role": "structure",
-          "sourceFile": "v1.7/manufacturing/packing/hardware-kit.md"
         }
       ],
       "id": "R2-wood-screws-1251ae65",
@@ -2110,16 +2100,6 @@
           "nodeId": "chapter:v1.7/assembly/toolbays.md",
           "role": "structure",
           "sourceFile": "v1.7/assembly/toolbays.md"
-        },
-        {
-          "facts": {
-            "structureKind": "assembly",
-            "title": "Tracks"
-          },
-          "line": null,
-          "nodeId": "chapter:v1.7/assembly/tracks.md",
-          "role": "structure",
-          "sourceFile": "v1.7/assembly/tracks.md"
         },
         {
           "facts": {
@@ -6256,11 +6236,6 @@
       "id": "R4-100mm-nut-bar",
       "queries": [
         {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
-        {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
           "params": {}
@@ -6359,11 +6334,6 @@
       ],
       "id": "R4-200mm-zip-tie",
       "queries": [
-        {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
         {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
@@ -6464,11 +6434,6 @@
       "id": "R4-camera-calibration-card",
       "queries": [
         {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
-        {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
           "params": {}
@@ -6567,11 +6532,6 @@
       ],
       "id": "R4-inline-air-filter",
       "queries": [
-        {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
         {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
@@ -6672,11 +6632,6 @@
       "id": "R4-leadscrew-block",
       "queries": [
         {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
-        {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
           "params": {}
@@ -6773,15 +6728,6 @@
         },
         {
           "facts": {
-            "title": "Hardware Kit"
-          },
-          "line": null,
-          "nodeId": "container:v1.7/manufacturing/packing/hardware-kit.md",
-          "role": "packing-structure",
-          "sourceFile": "v1.7/manufacturing/packing/hardware-kit.md"
-        },
-        {
-          "facts": {
             "categorySlug": "fasteners-and-hardware",
             "name": "M3 x 6mm Screw",
             "slug": "m3-screw-6mm"
@@ -6794,11 +6740,6 @@
       ],
       "id": "R4-m3-x-6mm-screw",
       "queries": [
-        {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
         {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
@@ -6899,11 +6840,6 @@
       "id": "R4-pressure-regulator",
       "queries": [
         {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
-        {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
           "params": {}
@@ -7002,11 +6938,6 @@
       ],
       "id": "R4-rubber-gasket",
       "queries": [
-        {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
         {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
@@ -7107,11 +7038,6 @@
       "id": "R4-shaft-coupler",
       "queries": [
         {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
-        {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
           "params": {}
@@ -7208,15 +7134,6 @@
         },
         {
           "facts": {
-            "title": "Hardware Kit"
-          },
-          "line": null,
-          "nodeId": "container:v1.7/manufacturing/packing/hardware-kit.md",
-          "role": "packing-structure",
-          "sourceFile": "v1.7/manufacturing/packing/hardware-kit.md"
-        },
-        {
-          "facts": {
             "categorySlug": "fasteners-and-hardware",
             "name": "Standard Spacer",
             "slug": "standard-spacer"
@@ -7229,11 +7146,6 @@
       ],
       "id": "R4-standard-spacer",
       "queries": [
-        {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
         {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
@@ -7333,11 +7245,6 @@
       ],
       "id": "R4-vacuum-tube",
       "queries": [
-        {
-          "cypher": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000",
-          "intent": "farmbot/checks/r3-parts.json",
-          "params": {}
-        },
         {
           "cypher": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000",
           "intent": "farmbot/checks/refs-assembly.json",
@@ -7775,7 +7682,6 @@
       "findingCount": 11,
       "id": "R4",
       "intents": [
-        "r3-parts.json",
         "refs-assembly.json",
         "refs-preassembly.json",
         "refs-bag.json",
