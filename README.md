@@ -1,138 +1,219 @@
 # ontographia-plm-demo
 
-Static, in-browser PLM demo (desk-fan bracket EOL / ECO) built on
-[Ontographia](https://github.com/edgesentry/ontographia). Vite + React + TypeScript, ja/en UI.
+Static, in-browser PLM graph queries with Ontographia and Relate by Neo4j.
 
-Phase 1 (#2) is an **Intent-driven traversal over a vendored fixture graph**. The WASM engine
-compiles each chip's Intent into parameter-bound Cypher and the HUD shows that string as an audit
-artifact. **The Cypher is not executed.** Results come from a small in-browser Intent executor
-(`src/lib/executor.ts`) that walks `vendor/ontographia/data/fixtures/deskfan_eol.graph.json`; there is
-no graph database, no server call, and no server-side LLM.
+## Use case
 
-Phase 2 (#3) adds an optional **free-text** path. After an explicit consent step, a
-`Llama-3.2-1B-Instruct-q4f16_1-MLC` model runs locally in the browser through
-[`@mlc-ai/web-llm`](https://www.npmjs.com/package/@mlc-ai/web-llm). The model is asked for Intent JSON
-only, never Cypher, and its output is checked against an explicit Intent schema before the existing
-`buildCypher` + `executeIntent` pipeline runs. Invalid JSON, unknown or missing fields, and Cypher
-text are rejected without executing anything. **Prompts are not sent to an external inference API.**
-Only the model files (weights and `model_lib`) are downloaded from the CSP allowlist, and only after
-consent. The chip path never goes through the LLM.
+Exploring and auditing product lifecycle management (PLM) data for the open-source [FarmBot Genesis v1.7](https://github.com/FarmBot-Docs/farmbot-genesis) hardware project across engineering bills of materials (EBOM) and manufacturing bills of materials (MBOM) / assembly documentation:
 
-- Four lanes, left to right: **EBOM, MBOM, SBOM, BOP**. The vendored fixture has no MBOM tags or
-  nodes, so the MBOM lane is intentionally empty with a "not in this fixture" note.
-- Five chips. Each `intent_path` in `chips.json` is resolved by filename only under
-  `vendor/ontographia/data/intents/`.
-- Only the start node and nodes actually reached by the Intent are highlighted. `lane_hints` can
-  emphasize a lane but never add highlighted nodes.
-- Cross-lane edges (`ORDERED_BY`, `CONSUMES`, `PRODUCES`, …) are listed separately and marked when
-  they are on the current path.
+- **Packing differences**: Detecting discrepancies between the packing list and the BOM (e.g. quantity mismatches).
+- **Assembly chapters for a part**: Identifying which assembly chapters use a specific part to assess change impact.
+- **Structures a part reaches**: Forward-tracing which manufacturing structures and pre-assembly tools reach a part.
+- **Kit parts in a category**: Listing kit parts that belong to a specific functional category.
+- **Unmatched references**: Surfacing manufacturing references that did not resolve to a canonical part page.
 
-## Setup
+High-level questions expressed as Ontographia Intents compile into parameter-bound Cypher queries and execute in Relate.
+
+## How it uses Relate
+
+- Mode: in memory (browser screen at `/farmbot/`) | directory store (inspectable build output)
+- Why this mode: A browser tab has no filesystem, so the interactive `/farmbot/` screen runs `@relate/relate-wasm` 1.0.1 in `:memory:`. The committed seed graph is fetched from `/farmbot/farmbot.seed.json`, verified by SHA-256 with Web Crypto against the committed digest, and loaded into an in-memory database that exists only in that tab. Relate WASM is lazily imported only on the first Run (not on first paint). For offline inspection, the same seed is compiled into a persistent Relate directory store using Node `@relate/relate` 1.0.1 with the JSON snapshot codec (`RELATE_SNAPSHOT_FORMAT=json`). Reviewers can inspect `graph.json` directly as plain JSON or open the directory store read-only from Node without running a browser or database daemon.
+- What the graph models: FarmBot Genesis v1.7 EBOM and MBOM data, including BOM parts, part variants, BOM categories, product variants, assembly chapters, pre-assembly pages, kits, the main carton, bags, usage lines, packing-versus-BOM quantity comparisons, quantity differences, and unresolved references. The logical store contains 604 nodes and 1022 relationships. Node labels include `Part`, `PartVariant`, `BomCategory`, `ProductVariant`, `AssemblyChapter`, `PreAssembly`, `Kit`, `Carton`, `Bag`, `Usage`, `QuantityComparison`, `QuantityDifference`, and `UnmatchedName`, along with abstract labels `Item`, `Structure`, `ManufacturingContainer`, and `Correspondence` that concrete nodes also carry.
+
+Relationship types and counts (from the logical dump):
+
+| Type | Count | Type | Count |
+| --- | ---: | --- | ---: |
+| `HAS_USAGE` | 279 | `USES_ITEM` | 257 |
+| `IN_CATEGORY` | 149 | `COMPARED_IN` | 76 |
+| `COMPARES_PART` | 76 | `FOR_VARIANT` | 76 |
+| `HAS_PART_VARIANT` | 44 | `APPLIES_TO` | 38 |
+| `SEEN_IN` | 17 | `CANDIDATE` | 10 |
+
+The browser screen does not execute against the unpacked directory store; it executes queries against the in-memory database and displays the committed store logical digest and node/relationship counts from `farmbot/dist/farmbot.release.json`.
+
+## Setup and run
+
+### Prerequisites
+
+- Node >=22 (or use `npx -y node@22`)
+- npm
+
+### Run locally
 
 ```bash
 npm ci
 npm run dev
 ```
 
-The engine is the published npm package
-[`@edgesentry/ontographia-wasm@0.1.9`](https://www.npmjs.com/package/@edgesentry/ontographia-wasm).
-There is no git clone, `cargo` build, or WASM prepare step; Vite emits the package's `.wasm` as a
-same-origin asset.
+Open <http://localhost:5173/farmbot/> to access the FarmBot query screen.
 
-## Verify
+### Run tests and smoke
 
-One command (typecheck, data/i18n checks, WASM smoke, Intent-executor gold tests, Intent-schema
-rejection tests, free-text prompt-set shape, WebLLM prompt/lazy-import guards, package/dist WASM
-integrity, the FarmBot seed copy, the `_headers` CSP allowlist, production build of both entries):
+To build and run the browser smoke suite against a local production build:
+
+```bash
+npx -y node@22 scripts/verify.mjs
+npm run smoke:farmbot
+```
+
+`npm run smoke:farmbot` requires `dist/` and checks the five preset questions against `farmbot/oracle/default-results.gold.json`.
+
+### Live demo
+
+- Live demo: <https://ontographia-plm-demo.egdesentry.workers.dev/> (HTTP 200 confirmed 2026-11-14)
+- FarmBot query screen: <https://ontographia-plm-demo.egdesentry.workers.dev/farmbot/>
+
+To run the browser smoke suite against the live deployment:
+
+```bash
+SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ npx -y node@22 scripts/smoke-farmbot.mjs
+```
+
+### Preset questions
+
+The screen provides five preset questions with localized labels (`src/farmbot/i18n.ts`):
+
+- **Q1 · Packing differences** — "Which parts disagree between the packing list and the BOM?" — 12 rows — no selector — columns: `part`, `packing_minus_part`
+- **Q2 · Assembly chapters for a part** — "Which assembly chapters use this part?" — default filter: `M5 x 10mm Screw` — 2 rows — DISTINCT applied after compile
+- **Q3 · Structures a part reaches** — "If this part changes, which structures reach it?" — default filter: `M5 Flange Locknut` — 7 rows — DISTINCT applied after compile
+- **Q4 · Kit parts in a category** — "Which kit parts belong to this category?" — default filter: `fasteners-and-hardware` — 24 rows
+- **Q5 · Unmatched references** — "Which references did not resolve to a part page?" — 17 rows (13 distinct `display_name` values) — filter `status = unmatched` is embedded in the Intent, no on-screen selector
+
+*Note on query compilation*: Ontographia 0.1.9 cannot express `DISTINCT`; Q2 and Q3 receive a documented post-compile `RETURN DISTINCT` step. Q1, Q4, and Q5 are not modified. Q1 projects only `part` and `packing_minus_part`. Quantity differences are reported, not corrected.
+
+## Where the data lives
+
+The committed seed and sidecar digests live in `farmbot/dist/`:
+
+- Seed file: `farmbot/dist/farmbot.seed.json` (364867 bytes) and sidecar `farmbot/dist/farmbot.seed.json.sha256`
+- DuckDB extract sidecar: `farmbot/dist/farmbot.duckdb.sha256` (the DuckDB file itself is a build output and is gitignored)
+- Release manifest: `farmbot/dist/farmbot.release.json` (format `farmbot-release-manifest-v1`)
+
+The directory store and DuckDB extract are gitignored under `farmbot/dist/.gitignore` (`*.duckdb`, `farmbot.relate-store/`, `farmbot-relate-store.tar.gz`).
+
+### Cryptographic digests
+
+| Artifact | Digest |
+| --- | --- |
+| Committed seed | `farmbot-graph-v1 sha256:db6503e0c17d024d610736b0996c98a2872b495936d4f84230747db603f36fb1` |
+| DuckDB extract | `farmbot-canonical-v1 sha256:6c32e7067b21679531fd7b6959670b76dcad461227137c96e54078a70ac3ee84` |
+| Relate store (logical) | `farmbot-relate-store-v2 sha256:c44248c23f4800f20c0d456924d930e09e8dd0bb76080fdbd63375bd4b52b7fc` |
+
+- The seed digest is the SHA-256 of the committed file bytes.
+- The DuckDB digest is a canonical dump of all tables, not the file bytes.
+- The Relate store digest is a canonical logical dump (`farmbot-relate-store-v2`) over all nodes and relationships (documented in `farmbot/docs/relate-store.md`). The archive bytes can differ between builds; judges should verify the logical store digest rather than assuming byte-identical tar.gz archives.
+
+### GitHub Release assets
+
+GitHub Release `farmbot-data-v1`: <https://github.com/edgesentry/plm-relate-ontographia-demo/releases/tag/farmbot-data-v1>  
+Target commit: `6aa2bc5cd595d23bf1d742d64b5963ae7b45da6b`
+
+| Asset | Size | Role |
+| --- | ---: | --- |
+| `farmbot-relate-store.tar.gz` | 21847 bytes | Relate persistent directory store archive |
+| `farmbot.duckdb` | 5517312 bytes | DuckDB canonical extract database |
+| `farmbot.release.json` | 801 bytes | Release manifest |
+| `SHA256SUMS` | 262 bytes | Checksums of release assets |
+
+### Third-party provenance and licenses
+
+- Project license: Apache-2.0 at `LICENSE`
+- FarmBot Genesis documentation source: submodule pinned at `44e0fa24d4a538dfa1255a4e89308ccabf3abaeb` (Genesis v1.7, also recorded in `farmbot/dist/farmbot.release.json`). Third-party notice: MIT in `farmbot/notices/LICENSE`.
+- Ontographia demo data provenance: `vendor/ontographia/PROVENANCE.md` (Apache-2.0).
+
+## Pre-event code used in this submission
+
+This section provides a factual list of what was already in the repository before the Contest Period, and what was added during it.
+
+### Hackathon context
+
+- Hackathon: Relate by Neo4j Hackathon
+- Overview: <https://relate.devpost.com/>
+- Official Rules: <https://relate.devpost.com/rules>
+- Contest Period: Starts 6:00 PM PST on Wednesday, November 11, 2026, which is 2026-11-12 10:00 in Asia/Singapore. Ends 6:00 PM PST on Friday, December 11, 2026, which is 2026-12-12 10:00 in Asia/Singapore.
+- Public repository: <https://github.com/edgesentry/plm-relate-ontographia-demo>
+- GitHub topics: `relate`, `relate-neo4j-hackathon`, `ontographia`
+
+### Repository timeline
+
+- Repository created at 2026-11-05 22:27 UTC, which is 2026-11-06 06:27 in Asia/Singapore, before the Contest Period start (2026-11-12 10:00 Asia/Singapore).
+- First commit: `1c07d8e` Initial commit (2026-11-06 06:27 Asia/Singapore).
+- 16 commits reached `main` before the Contest Period start. They include: Vite/React/TypeScript static scaffold (#1), `@edgesentry/ontographia-wasm` 0.1.9 from npm, the desk-fan EOL/ECO Intent-driven swimlane at `/` (#2), Cloudflare Workers static-assets deploy config, live smoke, ripple-pulse animation (#12), and in-browser WebLLM free-text to a validated Intent (#15, 2026-11-11 21:10 Asia/Singapore).
+- 10 commits reached `main` on or after the Contest Period start, through `6aa2bc5`. They include: headed WebGPU model-download smoke (#17); FarmBot Genesis v1.7 submodule with provenance (#23, first FarmBot work, 2026-11-12 19:43 Asia/Singapore); DuckDB extract (#24); FarmBot ontology (#21 / #25); Phase 2a Relate spike, graph generator, preset Intents and oracle, `/farmbot/` screen, browser smoke, and persistent store / Release assets (PRs #33–#38). Release `farmbot-data-v1` was published from `6aa2bc5`.
+
+The desk-fan screen at `/` and its WebLLM path remain in the repository. The work submitted for this hackathon's FarmBot / Relate demonstration is the `/farmbot/` screen, the committed seed, and the persistent Relate store published on Release `farmbot-data-v1`.
+
+## Desk-fan demo
+
+The repository retains the desk-fan EOL / ECO demonstration at `/`:
+
+- **Traversal**: An Intent-driven traversal over a vendored fixture graph (`vendor/ontographia/data/fixtures/deskfan_eol.graph.json`).
+- **Compilation without execution**: The WASM engine compiles each chip's Intent into parameter-bound Cypher shown in the HUD as an audit artifact. Cypher is not executed on a graph database; results come from a small in-browser Intent executor (`src/lib/executor.ts`).
+- **Lanes**: Four lanes represent EBOM, MBOM, SBOM, and BOP (the fixture has no MBOM nodes or tags, so that lane displays a "not in this fixture" notice).
+- **Optional in-browser WebLLM**: An optional free-text interface runs `Llama-3.2-1B-Instruct-q4f16_1-MLC` locally via `@mlc-ai/web-llm` in the browser tab:
+  - Requires WebGPU and explicit user consent.
+  - Memory and storage: 879.04 MB VRAM (from WebLLM `prebuiltAppConfig.vram_required_MB`); 695,242,752 bytes download (documented Hugging Face `usedStorage`, not measured here).
+  - The model is asked for Intent JSON only, validated against an explicit Intent schema; it never outputs Cypher and prompts are never sent to external inference APIs.
+  - Model weights and `model_lib` WASM are downloaded only after consent from the CSP allowlist in `public/_headers` (`https://huggingface.co`, `https://us.aws.cdn.hf.co`, `https://raw.githubusercontent.com`).
+  - Two-step flow: **Convert** asks the model for Intent JSON, validates, compiles, and shows a proposal without execution; **Run** executes the proposal through `buildCypher` + `executeIntent`.
+- **Smoke tests**:
+  - `npm run smoke`: Headless Playwright Chromium smoke test for chips, HUD, ja/en toggle, CSP, and consent gate (uses a test stub; never downloads the model).
+  - `npm run smoke:webgpu`: Headed system Chrome test that downloads the model to assert network transfers from allowlisted hosts and WebGPU initialization without typing prompts.
+  - `npm run smoke:live`: Runs smoke tests against the deployed origin (`SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ npm run smoke`).
+
+## Verify and smoke
+
+### Verification suite
+
+Run the comprehensive verification check:
 
 ```bash
 npm run verify
 ```
 
-The WASM smoke compiles all five Intents plus a malformed Intent (must reject) and checks that an ABI
-other than `1` is rejected. The gold tests assert the fixture paths for all five chips, an
-empty-result filter, malformed Intents, unsupported filter ops, and `limit`.
+`npm run verify` checks:
+- TypeScript typecheck (`tsc --noEmit`)
+- Data and i18n structure checks
+- Ontographia WASM smoke compilation (all five Intents plus a malformed Intent, ABI rejection)
+- Intent executor gold tests and schema rejection tests
+- Free-text prompt-set shape and WebLLM prompt/lazy-import guards
+- Package and dist WASM binary SHA-256 integrity
+- FarmBot seed copy byte-identity between source and distribution
+- CSP header allowlist rules in `public/_headers`
+- Production builds of both entries (`dist/index.html` and `dist/farmbot/index.html`)
 
-### FarmBot preset-question screen (`/farmbot/`)
-
-A second Vite entry (`farmbot/index.html` → `src/farmbot/main.tsx`) serves a screen at `/farmbot/`
-with the five FarmBot preset questions from `farmbot/intents/`. A Run compiles the selected Intent
-with the same Ontographia package against `farmbot/ontology/farmbot.native.yaml`, applies the
-documented post-compile `RETURN DISTINCT` step for Q2 and Q3 only (Ontographia 0.1.9 cannot express
-`DISTINCT`; see `farmbot/intents/README.md`), and executes the parameter-bound Cypher in an in-memory
-`new RelateDb()` seeded from the committed graph. Every string is Japanese and English.
-
-The seed is fetched as raw bytes from `/farmbot/farmbot.seed.json` (copied from
-`farmbot/dist/farmbot.seed.json` by a small Vite plugin, so there is no second committed copy) and its
-SHA-256 is checked with Web Crypto before parsing; a mismatch stops the run and loads nothing.
-`@relate/relate-wasm` and its WASM asset are imported only on the first Run, so first paint of
-`/farmbot/` requests neither.
-
-`npm run test:farmbot` includes tests for the digest guard, the shared `RETURN DISTINCT` step, the
-ontology endpoint parser, the seed loader, and the five default questions. `npm run verify` builds
-both entries and checks that `dist/farmbot/index.html` exists, that the served seed is byte-identical
-to the committed seed, that both WASM assets match their installed packages by SHA-256, and that the
-FarmBot entry's first-paint chunks contain no Relate engine code.
-
-### FarmBot browser smoke (`/farmbot/`)
+### FarmBot unit and oracle tests
 
 ```bash
-npx -y node@22 scripts/verify.mjs   # or a Node 22 `npm run build`; produces dist/
+npm run test:farmbot
+```
+
+Tests the SHA-256 digest guard, shared `RETURN DISTINCT` step, ontology endpoint parser, seed loader, and default questions against `farmbot/oracle/default-results.gold.json`.
+
+### FarmBot browser smoke
+
+```bash
+npx -y node@22 scripts/verify.mjs
 npm run smoke:farmbot
 ```
 
-`npm run smoke:farmbot` drives the built `/farmbot/` entry in headless Playwright
-Chromium (with a system Chrome fallback). It does not build; its local default
-requires `dist/farmbot/index.html` and `dist/farmbot/farmbot.seed.json`. When
-`SMOKE_BASE_URL` is unset it serves `dist/` itself on `SMOKE_PORT` (default
-`4175`) and stops the server in a `finally` block. `vite preview` does not apply
-`_headers` as HTTP headers, so the script's own server applies the `_headers`
-rules from `dist/` to the responses it serves: the production CSP on `/*`,
-`Content-Type: application/wasm` on `/assets/*.wasm`, and the immutable cache
-rule on `/assets/*`. In that mode the smoke asserts that the document response
-really carries the CSP, so "zero CSP violations" is not a vacuous result. For a
-deployed origin, set `SMOKE_BASE_URL`; the script then uses that origin as the
-site root and adds no headers of its own:
+Drives headless Playwright Chromium to verify `/farmbot/`:
+1. Question chips are visible and Ontographia is ready before first Run.
+2. First paint requests neither Relate WASM asset nor lazy Relate chunk.
+3. The page displays the committed seed digest, matching the SHA-256 of `/farmbot/farmbot.seed.json`.
+4. All five preset questions execute with default selectors and match `farmbot/oracle/default-results.gold.json` row-for-row (12 / 2 / 7 / 24 / 17 rows).
+5. Relate WASM is requested same-origin on the first successful Run.
+6. A single-byte-tampered seed is rejected with expected and actual digests, loads no rows, and never requests Relate.
+7. Zero CSP violations, zero non-same-origin network requests, and zero uncaught page errors.
 
-```bash
-SMOKE_BASE_URL=https://<origin>/ npx -y node@22 scripts/smoke-farmbot.mjs
-```
+### Local measurements and performance budgets
 
-The run fails unless all of these hold: the five question chips are visible and
-Ontographia is ready before the first Run; first paint requests neither the
-Relate WASM asset nor the lazy Relate chunk; the page shows the committed seed
-digest and a same-origin fetch of `/farmbot/farmbot.seed.json` hashes to it;
-each of the five questions runs with its committed default selector value and
-matches the committed gold file `farmbot/oracle/default-results.gold.json` row
-for row (12 / 2 / 7 / 24 / 17 rows); Relate WASM is requested same-origin on the
-first successful Run; a one-byte-tampered seed is rejected with the
-expected/actual digest, loads no rows, and never requests Relate; every context
-reports zero CSP violations and zero non-same-origin requests; and the
-happy-path `pageerror` list is empty.
+Measured on 2026-11-13 on macOS 27.2.1 arm64, Node 22.23.5, Playwright 1.65.0 with Chromium 158.0.8127.18, from a local `npm run smoke:farmbot` run against a local Node 22 production build. These are local numbers; no CI-runner timings were observed.
 
-The gold file is generated, never hand-edited:
+Artifact sizes (raw / `gzip -9 -n` bytes):
 
-```bash
-npx -y node@22 farmbot/scripts/gold-results.mjs
-```
-
-`npm run test:farmbot` includes a test that the committed gold still equals both
-Relate and the SQL oracle, so the fixture cannot drift.
-
-Timings come from `performance` marks around the engine work only: the whole
-`openRelateSession` (seed fetch, digest check, Relate load, in-memory seed load)
-and each `session.execute` call, excluding Ontographia compilation and React
-render. The proposed budgets are 2000 ms for the seed load and 100 ms per query.
-They are printed but not enforced; set `SMOKE_FARMBOT_ENFORCE_BUDGET=1` to fail a
-run that misses one. The `farmbot-smoke` CI job runs the build and the smoke on
-Node 22 without that variable.
-
-Measured on 2026-11-13 on macOS 27.2.1 arm64, Node 22.23.5, Playwright 1.65.0
-with its bundled Chromium 158.0.8127.18, from a local `npm run smoke:farmbot`
-run against a local Node 22 production build. These are local numbers; no
-CI-runner timings were observed.
-
-| Artifact | raw bytes | `gzip -9 -n` bytes |
+| Artifact | raw bytes | gzip -9 -n bytes |
 | --- | ---: | ---: |
 | `dist/assets/ontographia_wasm-BOJRSUvY.wasm` | 512627 | 173885 |
 | `dist/assets/relate_bg-9Q1Zsp67.wasm` | 6932319 | 2424791 |
@@ -140,14 +221,7 @@ CI-runner timings were observed.
 | `dist/assets/farmbot-DcVRHk05.js` | 38730 | 11896 |
 | `dist/farmbot/farmbot.seed.json` | 364867 | 18135 |
 
-Each row came from these two commands (substituting the file):
-
-```bash
-wc -c < dist/assets/ontographia_wasm-BOJRSUvY.wasm
-gzip -9 -n -c dist/assets/ontographia_wasm-BOJRSUvY.wasm | wc -c
-```
-
-Smoke timings from that run:
+Timings from that local run:
 
 | Measurement | ms | Proposed budget |
 | --- | ---: | ---: |
@@ -158,73 +232,13 @@ Smoke timings from that run:
 | Q4 `session.execute` | 1.5 | 100 |
 | Q5 `session.execute` | 0.8 | 100 |
 
-### FarmBot data: Relate store and release assets
+Budgets are printed in smoke output but not enforced unless `SMOKE_FARMBOT_ENFORCE_BUDGET=1`.
 
-**Mode.** The `/farmbot/` screen runs `@relate/relate-wasm` in `:memory:`:
-the digest-checked seed is loaded into a database that exists only in the tab.
-The same seed is also built into a **persistent Relate directory store** with
-the Node client `@relate/relate` 1.0.1 and the JSON snapshot codec. The
-directory store is a build output, not a committed file.
+## Rebuild and inspect the Relate store
 
-**Why this mode.** A browser tab has no filesystem, so the screen keeps the
-graph in memory; the measured seed fetch + digest check + in-memory load is
-585.9 ms in the table above. The directory store exists for inspection: a
-reviewer can open `graph.json` as plain JSON, or open the store read-only from
-Node and query it with Cypher. No server, no database process and no model is
-involved in either path.
+### Rebuilding from a fresh clone
 
-**What the graph models.** FarmBot Genesis v1.7 EBOM and MBOM data: BOM parts
-and their variants, BOM categories, assembly chapters, pre-assembly pages, kits,
-the main carton, bags, usage lines, packing-versus-BOM quantity comparisons and
-unresolved references. The store contains 604 nodes and 1022 relationships,
-counted from the logical dump. Node labels are `Part`, `PartVariant`,
-`BomCategory`, `ProductVariant`, `AssemblyChapter`, `PreAssembly`, `Kit`,
-`Carton`, `Bag`, `Usage`, `QuantityComparison`, `QuantityDifference` and
-`UnmatchedName`, plus the abstract `Item`, `Structure`, `ManufacturingContainer`
-and `Correspondence` labels that concrete nodes also carry. Relationship types
-and counts:
-
-| Type | Count | Type | Count |
-| --- | ---: | --- | ---: |
-| `HAS_USAGE` | 279 | `USES_ITEM` | 257 |
-| `IN_CATEGORY` | 149 | `COMPARED_IN` | 76 |
-| `COMPARES_PART` | 76 | `FOR_VARIANT` | 76 |
-| `HAS_PART_VARIANT` | 44 | `APPLIES_TO` | 38 |
-| `SEEN_IN` | 17 | `CANDIDATE` | 10 |
-
-**Where the data lives.** The seed and its sidecar are committed:
-
-- `farmbot/dist/farmbot.seed.json` and `farmbot/dist/farmbot.seed.json.sha256`;
-- `farmbot/dist/farmbot.duckdb.sha256` (the DuckDB file itself is a build
-  output);
-- `farmbot/dist/farmbot.release.json`, the digest manifest for the release.
-
-The DuckDB file and the store archive are GitHub Release assets of
-`farmbot-data-v1`:
-<https://github.com/edgesentry/plm-relate-ontographia-demo/releases/tag/farmbot-data-v1>.
-That release exists only once the maintainer has created it from the
-`farmbot-release-assets` CI artifact; the repository and CI never create it.
-The release contains `farmbot.duckdb`, `farmbot-relate-store.tar.gz`,
-`farmbot.release.json` and `SHA256SUMS`.
-
-The three digests:
-
-| Artifact | Digest |
-| --- | --- |
-| Committed seed | `farmbot-graph-v1 sha256:db6503e0c17d024d610736b0996c98a2872b495936d4f84230747db603f36fb1` |
-| DuckDB extract | `farmbot-canonical-v1 sha256:6c32e7067b21679531fd7b6959670b76dcad461227137c96e54078a70ac3ee84` |
-| Relate store (logical) | `farmbot-relate-store-v2 sha256:c44248c23f4800f20c0d456924d930e09e8dd0bb76080fdbd63375bd4b52b7fc` |
-
-The seed digest is the SHA-256 of the committed seed bytes. The DuckDB digest
-is the `farmbot-canonical-v1` hash of a canonical dump of every table, not of
-the file bytes. The store digest is logical, because the store files are not
-guaranteed to be byte-identical across runs or platforms, and the archive bytes
-differ between runs. The formats are documented in
-`farmbot/docs/relate-store.md`.
-
-**Rebuild from a fresh clone.**
-
-```sh
+```bash
 git clone --recurse-submodules https://github.com/edgesentry/plm-relate-ontographia-demo.git
 cd plm-relate-ontographia-demo
 npm ci
@@ -232,16 +246,19 @@ npm run release:assets
 npm run release:verify -- release-assets
 ```
 
-`release:assets` rebuilds the DuckDB file and the store, checks both digests
-and the counts against the committed manifest, and writes the three release
-files plus `SHA256SUMS` into `release-assets/`. `release:verify` re-checks a
-downloaded copy.
+`npm run release:assets` rebuilds the DuckDB file and the store (`RELATE_SNAPSHOT_FORMAT=json`), checks both digests and the counts against the committed manifest, and writes the release files plus `SHA256SUMS` into `release-assets/`.
 
-**Open the store read-only from Node.** Extract
-`farmbot-relate-store.tar.gz` and open the directory; keep the
-`.cypherlite.lock` marker files, or the read-only open fails:
+To verify downloaded release assets:
 
-```sh
+```bash
+npm run release:verify -- <dir>
+```
+
+### Opening the store read-only from Node
+
+Extract `farmbot-relate-store.tar.gz` and open the directory; keep the `.cypherlite.lock` marker files, or the read-only open fails:
+
+```bash
 tar -xzf farmbot-relate-store.tar.gz
 node --input-type=module -e "
 import { createRequire } from 'node:module';
@@ -251,154 +268,32 @@ console.log(db.connect().query('MATCH (n) RETURN count(n) AS nodes').rows[0]);
 "
 ```
 
-`farmbot/scripts/relate-store.mjs` exports `logicalDump(dir)` for the digest
-and `buildStore(dir)` for a rebuild.
+`Database.open(dir, { readOnly: true })` opens the directory read-only. `farmbot/scripts/relate-store.mjs` exports `logicalDump(dir)` for the digest and `buildStore(dir)` for a rebuild.
 
-**Maintainer: publishing the release.** CI uploads the
-`farmbot-release-assets` artifact; it never creates a release. After a merge,
-download the artifact, verify it, and attach the files:
+### Maintainer: publishing the release
 
-```sh
+CI uploads the `farmbot-release-assets` artifact; it never creates a release. After a merge, download the artifact, verify it, and attach the files:
+
+Release `farmbot-data-v1` already exists and targets `6aa2bc5cd595d23bf1d742d64b5963ae7b45da6b`. CI still uploads a `farmbot-release-assets` artifact after later merges; it never creates or updates the Release. To publish a new tag later:
+
+```bash
 gh run download <run-id> -n farmbot-release-assets -D release-assets
 npm run release:verify -- release-assets
-gh release create farmbot-data-v1 release-assets/* --target <merge-commit-sha> --title "FarmBot data v1" --notes "..."
+gh release create <tag> release-assets/* --target <merge-commit-sha> --title "..." --notes "..."
 ```
-
-### Browser smoke
-
-```bash
-npm run verify       # produces dist/
-npm run smoke
-```
-
-The smoke starts `vite preview`, launches Playwright Chromium (or system Chrome if Chromium is not
-installed), and checks all five chips: highlights, HUD Intent/Cypher/params/results, the Verified
-badge, ja/en toggle state retention, same-origin `application/wasm` fetch, no outbound requests, and
-mobile wrapping without horizontal clipping. It also checks the free-text consent gate (no Hugging
-Face or lazy-model request before consent), the WebGPU-missing notice with a working chip path, and
-rejection of invalid Intent output through a test-only stub of the lazy model chunk. The same stub
-checks the Convert → Run gate (Convert shows a proposal with no execution, no Verified badge, and no
-highlights until Run), remembered-consent first paint (zero model-host or lazy-chunk requests), and
-Cancel during model loading (returns to the cached view and keeps a finished chip result). The smoke
-never downloads the model.
-
-### WebGPU model smoke
-
-`npm run smoke` and `npm run verify` never download the model. To check the real download in a
-headed WebGPU browser, run the dedicated script:
-
-```bash
-npm run verify                 # or npm run build, produces dist/
-npm run smoke:webgpu
-```
-
-Against the live deploy, skip `dist/` and `vite preview`:
-
-```bash
-SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ npm run smoke:webgpu
-```
-
-`smoke:webgpu` launches the system Google Chrome channel headed (Chrome's bundled WebGPU/Metal
-adapter, not Playwright's Chromium) and fails if Chrome or a WebGPU adapter is unavailable. It
-clicks the consent button, waits up to four minutes for the model to become ready, and then asserts
-that the model weights came from the Hugging Face model hosts (`huggingface.co`, `*.hf.co`) and the
-`model_lib` WASM came from `raw.githubusercontent.com`, with no failed model-host request and zero
-CSP violations. It does not type a prompt or click Convert/Run, and it exits as soon as the model is
-ready or on the first failure.
-
-Every run uses a fresh temporary Chrome profile that is deleted afterwards, so each run performs the
-full download again (about 695 MB). This needs headed system Chrome with WebGPU (a Mac with Chrome is
-fine). It is not part of `npm run verify`, not part of `npm run smoke`, and not run in CI, because CI
-runners have no WebGPU and must not download the model.
-
-### Free-text (in-browser WebLLM)
-
-The free-text panel is off until you choose **Download and load model**. The consent card shows:
-
-| Item | Value |
-| --- | --- |
-| Model | `Llama-3.2-1B-Instruct-q4f16_1-MLC` |
-| GPU memory | 879.04 MB (WebLLM `prebuiltAppConfig.vram_required_MB`) |
-| Download | 695,242,752 bytes, about 695 MB (documented Hugging Face `usedStorage`, not measured here) |
-
-The model chunk and weights are never loaded on first paint. After the first download, a later visit
-can load the browser-cached model without asking for consent again, but it still does not download on
-first paint. Progress and a cancel action are shown while loading. WebGPU is required: when
-`navigator.gpu` is absent or `requestAdapter()` fails, free-text is disabled with a ja/en notice and
-all five chips keep working. There is no CPU, WASM, or server fallback for the model.
-
-Conversion is a two-step, explicit confirm flow. **Convert** asks the model for Intent JSON, validates
-it, compiles it, and shows a proposal: the matched one of the five templates (with its chip label and
-description) or a "modified / custom Intent" notice, plus the start → traverse path. Nothing runs at
-this point — no Verified badge, no HUD results, and no swimlane highlights. **Run** executes the
-proposal through the existing `buildCypher` + `executeIntent` path; **Cancel** discards it and leaves
-an already-finished result untouched. This confirm step is the gate for schema-valid misrouting; it is
-not a semantic check.
-
-The CSP in `public/_headers` allows only same-origin resources plus these exact origins for the
-optional model:
-
-- `https://huggingface.co` — model repository metadata and small model files
-- `https://us.aws.cdn.hf.co` — the observed weight-shard redirect target
-- `https://raw.githubusercontent.com` — the model_lib WebGPU WASM
-
-`worker-src` is `'self' blob:` because WebLLM runs in workers created from blob URLs. `script-src`
-stays `'self' 'wasm-unsafe-eval'`; the npm package is bundled, not loaded from a CDN.
-
-The model runs locally in the tab and the prompt is never sent to an external inference API. The
-system prompt contains the five supported Intent templates (the same vendored gold files) and asks
-the model to copy the closest one; WebLLM's JSON-constrained decoding keeps the output in the Intent
-shape. This is a deliberately closed-set demo, so free-text maps to one of the five chip Intents. The
-explicit schema checker still runs on every output, and anything that fails it (or Cypher text) is
-rejected before compilation or execution.
-
-`vendor/ontographia/data/intents/` has a fixed local prompt set under `src/data/intentPromptSet.ts`
-with at least one Japanese and one English paraphrase for each of the five gold Intents. It is a
-small regression/demo check, **not a benchmark**, and it is not run in CI. `scripts/eval-intents.mjs`
-can run it locally on a WebGPU machine; it downloads the model once and is not part of `npm run
-verify` or `npm run smoke`.
-
-On a machine without Playwright's browser bundle:
-
-```bash
-npx playwright install chromium
-```
-
-### Live smoke
-
-To run the same assertions against a deployed Worker, set `SMOKE_BASE_URL`:
-
-```bash
-npm run smoke:live
-```
-
-or equivalently:
-
-```bash
-SMOKE_BASE_URL=https://ontographia-plm-demo.egdesentry.workers.dev/ npm run smoke
-```
-
-`npm run smoke:live` defaults to the production Workers URL. `SMOKE_BASE_URL` can also point at a
-preview deploy URL. Setting it skips `vite preview` (no local server is started) and does not require
-a local `dist/`; the browser drives the given URL directly. Leaving `SMOKE_BASE_URL` unset keeps
-`npm run smoke` unchanged: it builds nothing itself, requires `dist/`, and serves it through
-`vite preview` on `SMOKE_PORT` (default `4173`). The WASM failure case uses Playwright
-`route.abort()` on `**/*.wasm`, so it runs in both local and live modes.
 
 ## Deploy
 
-Deployment targets Cloudflare Workers with static assets via Workers Builds (Git integration), not
-Cloudflare Pages. `npm run build` emits `dist/`; `public/_headers` is copied into `dist/` by Vite and
-is honored by Workers Assets, where it carries the CSP, the `application/wasm` content type, and
-immutable caching for hashed `/assets/*`. The `_headers` file itself is not served. Deployment is a
-maintainer step; CI does not deploy.
+Deployment targets Cloudflare Workers with static assets via Workers Builds (Git integration), not Cloudflare Pages. `npm run build` emits `dist/`; `public/_headers` is copied into `dist/` by Vite and is honored by Workers Assets, where it carries the CSP, the `application/wasm` content type, and immutable caching for hashed `/assets/*`. Deployment is a maintainer step; CI does not deploy.
 
-`wrangler.jsonc` at the repo root is an assets-only Worker config: it has no `main` script, serves
-`./dist`, and deliberately omits `not_found_handling` so unknown paths return `404` instead of
-falling back to `index.html` (this app has no client-side routes).
+`wrangler.jsonc` at the repository root is an assets-only Worker configuration:
+- Worker name: `ontographia-plm-demo`
+- Assets directory: `./dist`
+- Deliberately omits `not_found_handling` so unknown paths return 404 instead of falling back to `index.html`.
 
-Once this lands on `main`, connect the repository in the dashboard via **Workers & Pages → Create an
-application → Workers → Connect to Git** and use these values:
+### Workers Builds settings
+
+In Cloudflare Dashboard (**Workers & Pages → Create an application → Workers → Connect to Git**):
 
 | Setting | Value |
 | --- | --- |
@@ -408,26 +303,10 @@ application → Workers → Connect to Git** and use these values:
 | Production branch | `main` |
 | Build variable `NODE_VERSION` | `22` (Settings > Build > Build Variables and Secrets) |
 
-The Worker name must match `name` in `wrangler.jsonc` (`ontographia-plm-demo`), otherwise the build
-fails. Preview builds can be enabled for non-`main` branches; the default preview command is
-`npx wrangler preview`.
-
 ### Checking that a merge went live
 
-Every push to `main` should start a build in the Worker's **Deployments** list. To confirm a merge is
-live, compare the hashed bundle name served at `/` (`assets/index-*.js`) before and after the build,
-then run `npm run smoke:live`. If no new build appears after a merge, the Git connection is not
-triggering builds: in **Settings > Builds**, disconnect and reconnect the repository with the
-production branch `main`, and check that the Cloudflare Workers and Pages GitHub App still has
-access to this repository. The app must be installed on the `edgesentry` organization (not only on a
-personal account) with this repository selected under Repository access; otherwise pushes never reach
-Workers Builds. Reconnecting alone does not start a build; trigger one with any new commit on `main`.
+Every push to `main` starts a build in the Worker's Deployments list. To confirm a merge is live, compare the hashed bundle name served at `/` (`assets/index-*.js`) before and after the build, then run:
 
-## Data and audit
-
-Demo ontology data (COM, chips, intents, fixtures) lives in `vendor/ontographia/data/` and is kept in
-this repo; see `vendor/ontographia/PROVENANCE.md`. The topic is the desk-fan bracket EOL/ECO.
-
-`npm audit` currently reports esbuild/vite advisories that require a major Vite upgrade (Vite 5 is the
-latest 5.x line). They are devDependencies only and are not part of the built `dist/` bundle; the
-upgrade is tracked separately.
+```bash
+npm run smoke:live
+```
