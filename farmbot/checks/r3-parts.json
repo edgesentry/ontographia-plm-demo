@@ -1,0 +1,5 @@
+{
+  "start": { "class": "Part", "alias": "part" },
+  "return": [{ "alias": "part", "as_name": "part" }],
+  "limit": 1000
+}

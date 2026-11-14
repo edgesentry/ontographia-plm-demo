@@ -1,0 +1,15 @@
+{
+  "start": { "class": "QuantityDifference", "alias": "difference" },
+  "traverse": [
+    {
+      "relationship": "COMPARED_IN",
+      "direction": "out",
+      "to": { "class": "ManufacturingContainer", "alias": "container" }
+    }
+  ],
+  "return": [
+    { "alias": "difference", "as_name": "difference" },
+    { "alias": "container", "as_name": "container" }
+  ],
+  "limit": 100
+}

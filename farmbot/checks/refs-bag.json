@@ -1,0 +1,21 @@
+{
+  "start": { "class": "Bag", "alias": "structure" },
+  "traverse": [
+    {
+      "relationship": "HAS_USAGE",
+      "direction": "out",
+      "to": { "class": "Usage", "alias": "usage" }
+    },
+    {
+      "relationship": "USES_ITEM",
+      "direction": "out",
+      "to": { "class": "Part", "alias": "part" }
+    }
+  ],
+  "return": [
+    { "alias": "structure", "as_name": "structure" },
+    { "alias": "usage", "as_name": "usage" },
+    { "alias": "part", "as_name": "part" }
+  ],
+  "limit": 1000
+}

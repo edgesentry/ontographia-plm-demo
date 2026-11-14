@@ -1,0 +1,13 @@
+{
+  "start": { "class": "PreAssembly", "alias": "page" },
+  "filter": [
+    {
+      "alias": "page",
+      "property": "machine_readable",
+      "op": "eq",
+      "value": false
+    }
+  ],
+  "return": [{ "alias": "page", "as_name": "page" }],
+  "limit": 100
+}
