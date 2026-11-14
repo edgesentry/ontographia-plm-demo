@@ -158,6 +158,112 @@ Smoke timings from that run:
 | Q4 `session.execute` | 1.5 | 100 |
 | Q5 `session.execute` | 0.8 | 100 |
 
+### FarmBot data: Relate store and release assets
+
+**Mode.** The `/farmbot/` screen runs `@relate/relate-wasm` in `:memory:`:
+the digest-checked seed is loaded into a database that exists only in the tab.
+The same seed is also built into a **persistent Relate directory store** with
+the Node client `@relate/relate` 1.0.1 and the JSON snapshot codec. The
+directory store is a build output, not a committed file.
+
+**Why this mode.** A browser tab has no filesystem, so the screen keeps the
+graph in memory; the measured seed fetch + digest check + in-memory load is
+585.9 ms in the table above. The directory store exists for inspection: a
+reviewer can open `graph.json` as plain JSON, or open the store read-only from
+Node and query it with Cypher. No server, no database process and no model is
+involved in either path.
+
+**What the graph models.** FarmBot Genesis v1.7 EBOM and MBOM data: BOM parts
+and their variants, BOM categories, assembly chapters, pre-assembly pages, kits,
+the main carton, bags, usage lines, packing-versus-BOM quantity comparisons and
+unresolved references. The store contains 604 nodes and 1022 relationships,
+counted from the logical dump. Node labels are `Part`, `PartVariant`,
+`BomCategory`, `ProductVariant`, `AssemblyChapter`, `PreAssembly`, `Kit`,
+`Carton`, `Bag`, `Usage`, `QuantityComparison`, `QuantityDifference` and
+`UnmatchedName`, plus the abstract `Item`, `Structure`, `ManufacturingContainer`
+and `Correspondence` labels that concrete nodes also carry. Relationship types
+and counts:
+
+| Type | Count | Type | Count |
+| --- | ---: | --- | ---: |
+| `HAS_USAGE` | 279 | `USES_ITEM` | 257 |
+| `IN_CATEGORY` | 149 | `COMPARED_IN` | 76 |
+| `COMPARES_PART` | 76 | `FOR_VARIANT` | 76 |
+| `HAS_PART_VARIANT` | 44 | `APPLIES_TO` | 38 |
+| `SEEN_IN` | 17 | `CANDIDATE` | 10 |
+
+**Where the data lives.** The seed and its sidecar are committed:
+
+- `farmbot/dist/farmbot.seed.json` and `farmbot/dist/farmbot.seed.json.sha256`;
+- `farmbot/dist/farmbot.duckdb.sha256` (the DuckDB file itself is a build
+  output);
+- `farmbot/dist/farmbot.release.json`, the digest manifest for the release.
+
+The DuckDB file and the store archive are GitHub Release assets of
+`farmbot-data-v1`:
+<https://github.com/edgesentry/plm-relate-ontographia-demo/releases/tag/farmbot-data-v1>.
+That release exists only once the maintainer has created it from the
+`farmbot-release-assets` CI artifact; the repository and CI never create it.
+The release contains `farmbot.duckdb`, `farmbot-relate-store.tar.gz`,
+`farmbot.release.json` and `SHA256SUMS`.
+
+The three digests:
+
+| Artifact | Digest |
+| --- | --- |
+| Committed seed | `farmbot-graph-v1 sha256:db6503e0c17d024d610736b0996c98a2872b495936d4f84230747db603f36fb1` |
+| DuckDB extract | `farmbot-canonical-v1 sha256:6c32e7067b21679531fd7b6959670b76dcad461227137c96e54078a70ac3ee84` |
+| Relate store (logical) | `farmbot-relate-store-v2 sha256:c44248c23f4800f20c0d456924d930e09e8dd0bb76080fdbd63375bd4b52b7fc` |
+
+The seed digest is the SHA-256 of the committed seed bytes. The DuckDB digest
+is the `farmbot-canonical-v1` hash of a canonical dump of every table, not of
+the file bytes. The store digest is logical, because the store files are not
+guaranteed to be byte-identical across runs or platforms, and the archive bytes
+differ between runs. The formats are documented in
+`farmbot/docs/relate-store.md`.
+
+**Rebuild from a fresh clone.**
+
+```sh
+git clone --recurse-submodules https://github.com/edgesentry/plm-relate-ontographia-demo.git
+cd plm-relate-ontographia-demo
+npm ci
+npm run release:assets
+npm run release:verify -- release-assets
+```
+
+`release:assets` rebuilds the DuckDB file and the store, checks both digests
+and the counts against the committed manifest, and writes the three release
+files plus `SHA256SUMS` into `release-assets/`. `release:verify` re-checks a
+downloaded copy.
+
+**Open the store read-only from Node.** Extract
+`farmbot-relate-store.tar.gz` and open the directory; keep the
+`.cypherlite.lock` marker files, or the read-only open fails:
+
+```sh
+tar -xzf farmbot-relate-store.tar.gz
+node --input-type=module -e "
+import { createRequire } from 'node:module';
+const { Database } = createRequire(import.meta.url)('@relate/relate');
+const db = Database.open('farmbot.relate-store', { readOnly: true });
+console.log(db.connect().query('MATCH (n) RETURN count(n) AS nodes').rows[0]);
+"
+```
+
+`farmbot/scripts/relate-store.mjs` exports `logicalDump(dir)` for the digest
+and `buildStore(dir)` for a rebuild.
+
+**Maintainer: publishing the release.** CI uploads the
+`farmbot-release-assets` artifact; it never creates a release. After a merge,
+download the artifact, verify it, and attach the files:
+
+```sh
+gh run download <run-id> -n farmbot-release-assets -D release-assets
+npm run release:verify -- release-assets
+gh release create farmbot-data-v1 release-assets/* --target <merge-commit-sha> --title "FarmBot data v1" --notes "..."
+```
+
 ### Browser smoke
 
 ```bash

@@ -35,6 +35,12 @@ const EXPECTED_ROW_COUNTS = { q1: 12, q2: 2, q3: 7, q4: 24, q5: 17 };
 const QUESTION_IDS = ['q1', 'q2', 'q3', 'q4', 'q5'];
 
 const committedSeedPath = join(root, 'farmbot/dist/farmbot.seed.json');
+const committedManifest = JSON.parse(
+  readFileSync(join(root, 'farmbot/dist/farmbot.release.json'), 'utf8'),
+);
+const EXPECTED_STORE_DIGEST =
+  `${committedManifest.relateStore.digestFormat} ` +
+  `sha256:${committedManifest.relateStore.sha256}`;
 const goldPath = join(root, 'farmbot/oracle/default-results.gold.json');
 
 const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -483,6 +489,28 @@ async function main() {
     assert(
       expectedDigest === EXPECTED_SEED_DIGEST,
       `the page shows seed digest ${JSON.stringify(expectedDigest)}`,
+    );
+
+    const storeDigest = (
+      await page.locator('[data-testid="store-digest"]').textContent()
+    )?.trim();
+    assert(
+      storeDigest === EXPECTED_STORE_DIGEST,
+      `the page shows store digest ${JSON.stringify(storeDigest)}`,
+    );
+    const storeNodes = (
+      await page.locator('[data-testid="store-nodes"]').textContent()
+    )?.trim();
+    assert(
+      storeNodes === String(committedManifest.relateStore.nodes),
+      `the page shows ${JSON.stringify(storeNodes)} store nodes`,
+    );
+    const storeRelationships = (
+      await page.locator('[data-testid="store-relationships"]').textContent()
+    )?.trim();
+    assert(
+      storeRelationships === String(committedManifest.relateStore.relationships),
+      `the page shows ${JSON.stringify(storeRelationships)} store relationships`,
     );
 
     // Let every first-paint request register before freezing the list.

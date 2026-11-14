@@ -2,3 +2,6 @@
 *.duckdb
 *.duckdb.wal
 *.duckdb.tmp
+# The Relate directory store and its export are build outputs.
+farmbot.relate-store/
+farmbot-relate-store.tar.gz

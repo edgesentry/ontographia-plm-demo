@@ -10,6 +10,11 @@ import {
 } from './data';
 import { planQuestion } from './plan.mjs';
 import { formatSeedDigest, SEED_DIGEST } from './seed-digest.mjs';
+import {
+  STORE_DIGEST,
+  STORE_NODES,
+  STORE_RELATIONSHIPS,
+} from './store-digest.mjs';
 import { SeedFetchError, SeedRejectedError } from './seed';
 import { openRelateSession, RelateTrapError, type SessionStep } from './session';
 import { closeTrappedSession } from './session-cleanup.mjs';
@@ -575,6 +580,14 @@ export function App() {
           <dd>
             <code>{SOURCE_PIN}</code>
           </dd>
+          <dt>{t('storeDigestLabel')}</dt>
+          <dd>
+            <code data-testid="store-digest">{STORE_DIGEST}</code>
+          </dd>
+          <dt>{t('storeNodesLabel')}</dt>
+          <dd data-testid="store-nodes">{STORE_NODES}</dd>
+          <dt>{t('storeRelationshipsLabel')}</dt>
+          <dd data-testid="store-relationships">{STORE_RELATIONSHIPS}</dd>
           {relate.status === 'ready' && (
             <>
               <dt>{t('receivedDigestLabel')}</dt>

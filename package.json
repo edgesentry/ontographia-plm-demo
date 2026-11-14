@@ -9,6 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "verify": "node scripts/verify.mjs",
     "test:farmbot": "node --test 'farmbot/test/*.test.mjs'",
+    "release:assets": "node farmbot/scripts/release-assets.mjs",
+    "release:verify": "node farmbot/scripts/verify-release-assets.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:farmbot": "node scripts/smoke-farmbot.mjs",
     "smoke:webgpu": "node scripts/smoke-webgpu.mjs",
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@duckdb/node-api": "1.4.5-r.1",
+    "@relate/relate": "1.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.3.0",
