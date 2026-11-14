@@ -22,7 +22,9 @@ The default output directory is `farmbot/dist/farmbot.relate-store/`
 (gitignored). `--out <dir>` writes elsewhere. The script:
 
 1. verifies the SHA-256 of `farmbot/dist/farmbot.seed.json` against
-   `src/farmbot/seed-digest.mjs` and refuses to continue on a mismatch;
+   `src/farmbot/seed-digest.mjs` and refuses to continue on a mismatch; the
+   output directory is not touched before this check, so a bad seed leaves an
+   existing store intact;
 2. deletes and recreates the output directory;
 3. sets `RELATE_SNAPSHOT_FORMAT=json` in the child process that opens the
    writable store;
@@ -34,10 +36,12 @@ The default output directory is `farmbot/dist/farmbot.relate-store/`
 7. reads the graph back read-only and prints the logical digest, node count and
    relationship count, comparing them with the committed manifest.
 
-`--write-manifest` replaces the `relateStore` fields of
-`farmbot/dist/farmbot.release.json` with a fresh dump. Use it only when the
-seed or the load changed; the store fields are otherwise checked, not
-rewritten.
+`--write-manifest` rewrites only `digestFormat`, `sha256`, `nodes` and
+`relationships` inside the `relateStore` section of
+`farmbot/dist/farmbot.release.json`; the `file`, `client`, `clientVersion`,
+`snapshotCodec`, `seed`, `duckdb` and `genesis` values stay as committed. Use
+it only when the seed or the load changed; the store fields are otherwise
+checked, not rewritten.
 
 The store is built in a child Node process. The Node client has no `close()`
 method, so the writer handle lives until its process exits; archiving or
@@ -79,11 +83,11 @@ read-only, reads every node and every relationship through Cypher, and
 serializes them canonically. Engine-internal numeric ids and element ids are
 never used: a relationship records the `id` property of its two nodes.
 
-The format id is `farmbot-relate-store-v1`. The serialized text is:
+The format id is `farmbot-relate-store-v2`. The serialized text is:
 
 ```text
-farmbot-relate-store-v1
-{"kind":"node","labels":[...],"properties":{...}}
+farmbot-relate-store-v2
+{"kind":"node","labels":[...],"properties":{"<key>":{"type":"...","value":...},...}}
 ...
 {"from":"...","kind":"relationship","properties":{...},"to":"...","type":"..."}
 ...
@@ -96,12 +100,22 @@ farmbot-relate-store-v1
 - Relationship objects carry `kind`, `type`, `from`, `to`, and `properties`.
   `from` and `to` are the `id` properties of the endpoint nodes. Relationships
   are ordered by type, then `from`, then `to`, then the canonical properties.
-- `bigint` values are encoded as `{"$int64":"<decimal>"}`. Non-finite numbers,
-  non-plain objects, functions, symbols and `undefined` throw: a lossy encoding
-  would make the digest meaningless.
+- Every property is **typed**. The dump query also asks the engine for
+  `[k IN keys(n) | [k, valueType(n[k])]]` (and the same for relationships), and
+  each property is encoded as `{"type": <engine type>, "value": <canonical
+  value>}`. `type` is the engine's spelling, such as `"INTEGER NOT NULL"` or
+  `"LIST<FLOAT NOT NULL> NOT NULL"`.
+- INTEGER values (a JS number or a `bigint`) are decimal strings, so `1` and
+  `1n` with type INTEGER encode the same. FLOAT values are JSON numbers.
+  STRING and BOOLEAN values are JSON strings and literals, lists encode each
+  element by the type inside `LIST<...>`, and maps encode as canonical JSON.
+- A value that does not match its reported type (for example a fractional
+  number for INTEGER), and any unsupported type, throws: a lossy encoding would
+  make the digest meaningless. Because FLOAT values are JSON numbers, `-0.0`
+  and `0.0` encode the same; the seed has no such value.
 
 The digest is SHA-256 over the UTF-8 bytes of the serialized text, printed as
-`farmbot-relate-store-v1 sha256:<hex>`. The seed used here has 604 nodes and
+`farmbot-relate-store-v2 sha256:<hex>`. The seed used here has 604 nodes and
 1022 relationships, and its digest is the `relateStore.sha256` value in
 `farmbot/dist/farmbot.release.json`.
 
@@ -143,3 +157,11 @@ npm run release:verify -- release-assets
 three release files and `SHA256SUMS`. `release:verify` repeats the checks on a
 directory that may have been downloaded: file hashes, the bundled manifest, the
 store's logical digest and counts, and the DuckDB canonical digest.
+
+`SHA256SUMS` may name only the three expected asset basenames; any other name
+(including one with `..` or a path separator) fails before a file is read. The
+store archive is untrusted input: before extraction every member name must sit
+under `farmbot.relate-store/` with no absolute path and no empty, `.` or `..`
+segment, and after extraction the tree may contain only directories and
+single-link regular files. A symlink, hardlink or other entry type fails the
+check, and the archive is removed from the temporary directory afterwards.

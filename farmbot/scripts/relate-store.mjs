@@ -33,7 +33,7 @@ import { SEED_SHA256_HEX } from '../../src/farmbot/seed-digest.mjs';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const FARMBOT_DIR = resolve(SCRIPT_DIR, '..');
 
-export const STORE_FORMAT = 'farmbot-relate-store-v1';
+export const STORE_FORMAT = 'farmbot-relate-store-v2';
 export const STORE_DIR_NAME = 'farmbot.relate-store';
 export const STORE_ARCHIVE_NAME = 'farmbot-relate-store.tar.gz';
 export const MANIFEST_NAME = 'farmbot.release.json';
@@ -75,9 +75,11 @@ export function compareStrings(left, right) {
  * Canonical JSON for one dump line. Object keys are sorted at every level, so
  * the same graph always serializes to the same bytes.
  *
- * Supported values are `null`, booleans, finite numbers, strings, arrays,
- * plain objects, and `bigint` (encoded as `{"$int64":"<decimal>"}`). Anything
- * else throws: silently lossy encodings would make the digest meaningless.
+ * Supported values are `null`, booleans, finite numbers, strings, arrays and
+ * plain objects. Anything else throws: silently lossy encodings would make the
+ * digest meaningless. In particular a bare `bigint` throws, because without an
+ * engine type it cannot be told apart from other numeric shapes; property
+ * values are encoded by `typedPropertyJson`, which carries the type.
  *
  * @param {unknown} value
  * @returns {string}
@@ -95,7 +97,9 @@ export function canonicalJson(value) {
       }
       return JSON.stringify(value);
     case 'bigint':
-      return `{"$int64":${JSON.stringify(value.toString())}}`;
+      throw new Error(
+        'unsupported bigint value in the store dump: a bare bigint has no engine type',
+      );
     case 'object':
       break;
     default:
@@ -116,18 +120,142 @@ export function canonicalJson(value) {
     .join(',')}}`;
 }
 
+const NOT_NULL_SUFFIX = ' NOT NULL';
+
+/** A short, bigint-safe description of a JS value for error messages. */
+function describeValue(value) {
+  if (typeof value === 'bigint') return `${value}n`;
+  if (typeof value === 'string') return JSON.stringify(value);
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * The engine type string without its trailing `NOT NULL`, e.g. `LIST<INTEGER>`.
+ *
+ * `valueType()` reports values such as `INTEGER NOT NULL`,
+ * `LIST<FLOAT NOT NULL> NOT NULL` or `MAP`.
+ *
+ * @param {string} type
+ * @returns {string}
+ */
+export function baseEngineType(type) {
+  if (typeof type !== 'string' || type.length === 0) {
+    throw new Error('a store property has no engine type');
+  }
+  return type.endsWith(NOT_NULL_SUFFIX) ? type.slice(0, -NOT_NULL_SUFFIX.length) : type;
+}
+
+/**
+ * Encode one property value as canonical JSON for its reported engine type.
+ *
+ * INTEGER values are decimal strings, so a safe-integer JS number and a bigint
+ * of the same value encode the same, while a map that happens to contain an
+ * `"$int64"` key is still typed as `MAP`. FLOAT values are JSON numbers, which
+ * cannot distinguish `-0.0` from `0.0`.
+ *
+ * @param {string} type The engine type, as `valueType()` reported it.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function encodeTypedValue(type, value) {
+  const base = baseEngineType(type);
+  const mismatch = (expected) =>
+    new Error(
+      `store value ${describeValue(value)} does not match its engine type ` +
+        `${JSON.stringify(type)} (expected ${expected})`,
+    );
+
+  if (base === 'INTEGER') {
+    if (typeof value === 'bigint') return JSON.stringify(value.toString());
+    if (typeof value === 'number' && Number.isInteger(value)) {
+      return JSON.stringify(BigInt(value).toString());
+    }
+    throw mismatch('an integer');
+  }
+  if (base === 'FLOAT') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw mismatch('a finite number');
+    }
+    return JSON.stringify(value);
+  }
+  if (base === 'BOOLEAN') {
+    if (typeof value !== 'boolean') throw mismatch('a boolean');
+    return value ? 'true' : 'false';
+  }
+  if (base === 'STRING') {
+    if (typeof value !== 'string') throw mismatch('a string');
+    return JSON.stringify(value);
+  }
+  const list = /^LIST<(.+)>$/.exec(base);
+  if (list) {
+    if (!Array.isArray(value)) throw mismatch('a list');
+    return `[${value.map((entry) => encodeTypedValue(list[1], entry)).join(',')}]`;
+  }
+  if (base === 'MAP' || base.startsWith('MAP<')) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw mismatch('a map');
+    }
+    return canonicalJson(value);
+  }
+  throw new Error(`unsupported property type ${JSON.stringify(type)} in the store dump`);
+}
+
+/**
+ * One typed property: `{"type": <valueType string>, "value": <canonical value>}`.
+ *
+ * @param {string} type
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function typedPropertyJson(type, value) {
+  return `{"type":${canonicalJson(type)},"value":${encodeTypedValue(type, value)}}`;
+}
+
+/**
+ * Canonical JSON object of typed properties, keys sorted by code point.
+ *
+ * @param {Record<string, unknown>} properties
+ * @param {Array<[string, string]>} types Pairs from `[k IN keys(n) | [k, valueType(n[k])]]`.
+ * @param {string} where Used in error messages, e.g. `node "a"`.
+ * @returns {string}
+ */
+function typedPropertiesJson(properties, types, where) {
+  const typeByKey = new Map();
+  for (const entry of types ?? []) {
+    if (!Array.isArray(entry) || typeof entry[0] !== 'string') {
+      throw new Error(`${where} returned a malformed engine type entry`);
+    }
+    typeByKey.set(entry[0], entry[1]);
+  }
+  const keys = Object.keys(properties).sort(compareStrings);
+  return `{${keys
+    .map((key) => {
+      if (!typeByKey.has(key)) {
+        throw new Error(`${where} property ${JSON.stringify(key)} has no reported engine type`);
+      }
+      return `${JSON.stringify(key)}:${typedPropertyJson(typeByKey.get(key), properties[key])}`;
+    })
+    .join(',')}}`;
+}
+
 /**
  * Read the committed seed and refuse to continue when its bytes do not match
  * the digest the browser and the tests use.
  *
+ * @param {string} [seedPath] Test hook; defaults to the committed seed.
  * @returns {{ bytes: Buffer, seed: { nodes: object[], edges: object[] }, sha256: string }}
  */
-export function loadCommittedSeed() {
-  const bytes = readFileSync(COMMITTED_SEED);
+export function loadCommittedSeed(seedPath = COMMITTED_SEED) {
+  const source = resolve(seedPath);
+  const bytes = readFileSync(source);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   if (sha256 !== SEED_SHA256_HEX) {
     throw new Error(
-      `committed seed digest mismatch: ${COMMITTED_SEED} hashes to ${sha256}, ` +
+      `committed seed digest mismatch: ${source} hashes to ${sha256}, ` +
         `but src/farmbot/seed-digest.mjs expects ${SEED_SHA256_HEX}. Refusing to build the store.`,
     );
   }
@@ -146,8 +274,10 @@ export function seedStatements(seed) {
 }
 
 /**
- * Build the store at `dir`. The directory is deleted first, so a failed build
- * never leaves a half-written store behind.
+ * Build the store at `dir`. The committed seed digest is checked before the
+ * output directory is touched, so a bad seed leaves an existing store intact.
+ * After that the directory is deleted and recreated, so a failed load never
+ * leaves a half-written store behind.
  *
  * `RELATE_SNAPSHOT_FORMAT=json` selects the JSON snapshot codec. The default
  * codec writes Parquet shards, which are not readable as one file, so the
@@ -158,14 +288,17 @@ export function seedStatements(seed) {
  * handle lives until the process ends. `buildStoreInChild` does the former.
  *
  * @param {string} dir
+ * @param {{ seedPath?: string }} [options] `seedPath` exists for tests: point
+ *   the build at another seed file. The digest guard still applies.
  * @returns {{ dir: string, statements: number, graphJsonBytes: number }}
  */
-export function buildStore(dir) {
+export function buildStore(dir, options = {}) {
   const target = resolve(dir);
+  const { seed } = loadCommittedSeed(options.seedPath ?? COMMITTED_SEED);
+
   rmSync(target, { recursive: true, force: true });
   mkdirSync(target, { recursive: true });
 
-  const { seed } = loadCommittedSeed();
   const statements = seedStatements(seed);
 
   process.env[SNAPSHOT_FORMAT_ENV] = SNAPSHOT_FORMAT;
@@ -238,6 +371,10 @@ export function buildStoreInChild(dir) {
 /**
  * Read the whole graph back through Cypher and serialize it canonically.
  *
+ * Every property is typed: the value is encoded together with the engine type
+ * that `valueType()` reports for it, so an INTEGER and a FLOAT, or a bigint and
+ * a map that serializes the same way, cannot collide.
+ *
  * Nodes are ordered by their `id` property; relationships by type, then the
  * endpoint `id` properties, then the canonical properties. Engine-internal
  * numeric ids and element ids are never used.
@@ -261,11 +398,13 @@ export function logicalDump(dir) {
   const connection = database.connect();
 
   const nodeRows = connection.query(
-    'MATCH (n) RETURN labels(n) AS labels, properties(n) AS properties',
+    'MATCH (n) RETURN labels(n) AS labels, properties(n) AS properties, ' +
+      '[k IN keys(n) | [k, valueType(n[k])]] AS types',
   ).rows;
   const relationshipRows = connection.query(
     'MATCH (a)-[r]->(b) RETURN type(r) AS type, a.id AS from, b.id AS to, ' +
-      'properties(r) AS properties',
+      'properties(r) AS properties, ' +
+      '[k IN keys(r) | [k, valueType(r[k])]] AS types',
   ).rows;
 
   const labels = {};
@@ -277,7 +416,17 @@ export function logicalDump(dir) {
     }
     const sortedLabels = [...(row.labels ?? [])].sort(compareStrings);
     for (const label of sortedLabels) labels[label] = (labels[label] ?? 0) + 1;
-    return { id, line: canonicalJson({ kind: 'node', labels: sortedLabels, properties }) };
+    const nodesProperties = typedPropertiesJson(
+      properties,
+      row.types,
+      `node ${JSON.stringify(id)}`,
+    );
+    return {
+      id,
+      line:
+        `{"kind":"node","labels":${canonicalJson(sortedLabels)},` +
+        `"properties":${nodesProperties}}`,
+    };
   });
   nodes.sort((left, right) => compareStrings(left.id, right.id));
 
@@ -292,17 +441,19 @@ export function logicalDump(dir) {
       );
     }
     relationshipTypes[row.type] = (relationshipTypes[row.type] ?? 0) + 1;
+    const relationshipProperties = typedPropertiesJson(
+      row.properties ?? {},
+      row.types,
+      `relationship ${JSON.stringify(row.type)}`,
+    );
     return {
       type: row.type,
       from: row.from,
       to: row.to,
-      line: canonicalJson({
-        kind: 'relationship',
-        type: row.type,
-        from: row.from,
-        to: row.to,
-        properties: row.properties ?? {},
-      }),
+      line:
+        `{"from":${canonicalJson(row.from)},"kind":"relationship",` +
+        `"properties":${relationshipProperties},"to":${canonicalJson(row.to)},` +
+        `"type":${canonicalJson(row.type)}}`,
     };
   });
   relationships.sort(
@@ -313,7 +464,12 @@ export function logicalDump(dir) {
       compareStrings(left.line, right.line),
   );
 
-  const text = `${[STORE_FORMAT, ...nodes.map((node) => node.line), ...relationships.map((row) => row.line)].join('\n')}\n`;
+  const lines = [
+    STORE_FORMAT,
+    ...nodes.map((node) => node.line),
+    ...relationships.map((row) => row.line),
+  ];
+  const text = `${lines.join('\n')}\n`;
   const sha256 = createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
 
   return {

@@ -11,8 +11,8 @@
   },
   "relateStore": {
     "file": "farmbot-relate-store.tar.gz",
-    "digestFormat": "farmbot-relate-store-v1",
-    "sha256": "d5f6e521977bcad7aef634965b427634474b6e03438187abdfcd4b81149985b4",
+    "digestFormat": "farmbot-relate-store-v2",
+    "sha256": "c44248c23f4800f20c0d456924d930e09e8dd0bb76080fdbd63375bd4b52b7fc",
     "nodes": 604,
     "relationships": 1022,
     "client": "@relate/relate",

@@ -11,15 +11,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 
 import { canonicalDigest } from './extract.mjs';
-import {
-  MANIFEST_NAME,
-  STORE_DIR_NAME,
-  logicalDump,
-  readManifest,
-} from './relate-store.mjs';
+import { extractStoreArchive } from './lib/archive-guard.mjs';
+import { MANIFEST_NAME, logicalDump, readManifest } from './relate-store.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -76,6 +71,9 @@ export async function verifyReleaseAssets(dir) {
     return assetDir;
   });
 
+  const expected = [MANIFEST_NAME, manifest.duckdb.file, manifest.relateStore.file];
+  const allowedNames = new Set(expected);
+
   const sumsPath = join(assetDir, SHA256SUMS_NAME);
   const sums = new Map();
   await runCheck(`${SHA256SUMS_NAME} parses`, () => {
@@ -86,18 +84,20 @@ export async function verifyReleaseAssets(dir) {
       if (!match) {
         throw new Error(`line ${index + 1} is not "<hex>  <name>": ${JSON.stringify(line)}`);
       }
-      if (sums.has(match[2])) throw new Error(`duplicate entry for ${match[2]}`);
-      sums.set(match[2], match[1]);
+      const name = match[2];
+      if (!allowedNames.has(name)) {
+        throw new Error(
+          `line ${index + 1} names ${JSON.stringify(name)}, which is not one of ` +
+            `${[...allowedNames].join(', ')}`,
+        );
+      }
+      if (sums.has(name)) throw new Error(`duplicate entry for ${name}`);
+      sums.set(name, match[1]);
     }
     if (sums.size === 0) throw new Error('no entries');
     return `${sums.size} entries`;
   });
 
-  const expected = [
-    MANIFEST_NAME,
-    manifest.duckdb.file,
-    manifest.relateStore.file,
-  ];
   for (const name of expected) {
     await runCheck(`expected asset ${name} is present and listed`, () => {
       const path = join(assetDir, name);
@@ -131,22 +131,15 @@ export async function verifyReleaseAssets(dir) {
   const workDir = mkdtempSync(join(tmpdir(), 'farmbot-verify-assets-'));
   try {
     const archivePath = join(assetDir, manifest.relateStore.file);
+    let storeDir;
     await runCheck('store archive extracts and opens read-only', () => {
-      const result = spawnSync('tar', ['-xzf', archivePath, '-C', workDir], {
-        encoding: 'utf8',
-        env: { ...process.env, COPYFILE_DISABLE: '1' },
-      });
-      if (result.status !== 0) {
-        throw new Error(`tar -xzf failed (exit ${result.status}): ${String(result.stderr).trim()}`);
-      }
-      const storeDir = join(workDir, STORE_DIR_NAME);
-      if (!existsSync(storeDir)) throw new Error(`${STORE_DIR_NAME} is not in the archive`);
+      storeDir = extractStoreArchive(archivePath, workDir);
       return storeDir;
     });
 
     let dump;
     await runCheck('store logical digest and counts match the manifest', () => {
-      dump = logicalDump(join(workDir, STORE_DIR_NAME));
+      dump = logicalDump(storeDir);
       if (dump.sha256 !== manifest.relateStore.sha256) {
         throw new Error(
           `computed ${manifest.relateStore.digestFormat}:${dump.sha256}, ` +
