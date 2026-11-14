@@ -1,0 +1,23 @@
+{
+  "start": { "class": "ManufacturingContainer", "alias": "structure" },
+  "traverse": [
+    {
+      "relationship": "HAS_USAGE",
+      "direction": "out",
+      "to": { "class": "Usage", "alias": "usage" }
+    }
+  ],
+  "filter": [
+    {
+      "alias": "usage",
+      "property": "match_method",
+      "op": "eq",
+      "value": "unmatched"
+    }
+  ],
+  "return": [
+    { "alias": "structure", "as_name": "structure" },
+    { "alias": "usage", "as_name": "usage" }
+  ],
+  "limit": 100
+}

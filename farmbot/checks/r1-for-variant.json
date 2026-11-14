@@ -1,0 +1,15 @@
+{
+  "start": { "class": "QuantityDifference", "alias": "difference" },
+  "traverse": [
+    {
+      "relationship": "FOR_VARIANT",
+      "direction": "out",
+      "to": { "class": "ProductVariant", "alias": "variant" }
+    }
+  ],
+  "return": [
+    { "alias": "difference", "as_name": "difference" },
+    { "alias": "variant", "as_name": "variant" }
+  ],
+  "limit": 100
+}

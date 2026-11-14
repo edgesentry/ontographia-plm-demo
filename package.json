@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "verify": "node scripts/verify.mjs",
     "test:farmbot": "node --test 'farmbot/test/*.test.mjs'",
+    "agent:farmbot": "node farmbot/scripts/agent-farmbot.mjs",
     "release:assets": "node farmbot/scripts/release-assets.mjs",
     "release:verify": "node farmbot/scripts/verify-release-assets.mjs",
     "smoke": "node scripts/smoke.mjs",

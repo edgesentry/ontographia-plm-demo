@@ -1,0 +1,71 @@
+{
+  "format": "farmbot-check-compiled-v1",
+  "intents": [
+    {
+      "file": "r1-compared-in.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (difference:QuantityDifference)-[:COMPARED_IN]->(container:ManufacturingContainer)\nRETURN difference AS difference, container AS container\nLIMIT 100"
+    },
+    {
+      "file": "r1-for-variant.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (difference:QuantityDifference)-[:FOR_VARIANT]->(variant:ProductVariant)\nRETURN difference AS difference, variant AS variant\nLIMIT 100"
+    },
+    {
+      "file": "r1-quantity-difference.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (difference:QuantityDifference)-[:COMPARES_PART]->(part:Part)\nRETURN difference AS difference, part AS part\nLIMIT 100"
+    },
+    {
+      "file": "r2-assembly-unmatched.json",
+      "params": {
+        "param_0": "unmatched"
+      },
+      "query": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)\nFILTER usage.match_method = $param_0\nRETURN structure AS structure, usage AS usage\nLIMIT 100"
+    },
+    {
+      "file": "r2-manufacturing-unmatched.json",
+      "params": {
+        "param_0": "unmatched"
+      },
+      "query": "CYPHER 25\nMATCH (structure:ManufacturingContainer)-[:HAS_USAGE]->(usage:Usage)\nFILTER usage.match_method = $param_0\nRETURN structure AS structure, usage AS usage\nLIMIT 100"
+    },
+    {
+      "file": "r3-parts.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (part:Part)\nRETURN part AS part\nLIMIT 1000"
+    },
+    {
+      "file": "r5-unreadable-preassemblies.json",
+      "params": {
+        "param_0": false
+      },
+      "query": "CYPHER 25\nMATCH (page:PreAssembly)\nFILTER page.machine_readable = $param_0\nRETURN page AS page\nLIMIT 100"
+    },
+    {
+      "file": "refs-assembly.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (structure:AssemblyChapter)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000"
+    },
+    {
+      "file": "refs-bag.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (structure:Bag)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000"
+    },
+    {
+      "file": "refs-carton.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (structure:Carton)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000"
+    },
+    {
+      "file": "refs-kit.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (structure:Kit)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000"
+    },
+    {
+      "file": "refs-preassembly.json",
+      "params": {},
+      "query": "CYPHER 25\nMATCH (structure:PreAssembly)-[:HAS_USAGE]->(usage:Usage)-[:USES_ITEM]->(part:Part)\nRETURN structure AS structure, usage AS usage, part AS part\nLIMIT 1000"
+    }
+  ]
+}
